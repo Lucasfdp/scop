@@ -1,0 +1,141 @@
+{
+  "repo": "Lucasfdp/scop",
+  "branch": "main",
+  "es_mirror": true,
+  "phases": [
+    {
+      "name": "1 · Foundations",
+      "sections": [
+        1,
+        2
+      ],
+      "description": "Rust for a C programmer, how a GPU draws, a winit window"
+    },
+    {
+      "name": "2 · Vulkan core",
+      "sections": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "description": "Instance to triangle from buffers; engine/app split"
+    },
+    {
+      "name": "3 · 3D scene",
+      "sections": [
+        9,
+        10,
+        11
+      ],
+      "description": "Own maths, uniforms, depth: a spinning cube in perspective"
+    },
+    {
+      "name": "4 · Mandatory features",
+      "sections": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "description": ".obj parser, grey faces, controls, own TGA loader, smooth texture fade"
+    },
+    {
+      "name": "5 · Mandatory finish",
+      "sections": [
+        16
+      ],
+      "description": "Resize, make one-liner, README, self-evaluation. Bonus is only graded if this is perfect."
+    },
+    {
+      "name": "6 · Bonus",
+      "sections": [
+        17,
+        18,
+        19
+      ],
+      "description": "Complex .obj, texture mapping without stretching, own extras"
+    }
+  ],
+  "areas": {
+    "engine": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      14,
+      17,
+      18
+    ],
+    "scop": [
+      1,
+      8,
+      13,
+      15,
+      16,
+      19
+    ]
+  },
+  "workflow": [
+    "Section file written (`learn/`)",
+    "Read the section and answered its gate questions",
+    "Gate passed (misses re-taught, fresh question re-asked)",
+    "Checkpoint code written by Claude, walked through part by part",
+    "Explain-back passed: can explain every line",
+    "AI-written code noted in README → AI usage"
+  ],
+  "verify": [
+    "cargo build",
+    "cargo clippy --all-targets",
+    "cargo fmt --check",
+    "cargo test",
+    "cargo run -p scop -- resources/42.obj (checked on the Mac)"
+  ],
+  "tasks": [
+    {
+      "slug": "moltenvk-version",
+      "title": "Check the Vulkan version MoltenVK reports (before § 5)",
+      "phase": "2 · Vulkan core",
+      "labels": [
+        "blocker"
+      ],
+      "body": "Run `vulkaninfo --summary`. The reported version decides dynamic rendering vs render passes in § 5. Log the result in `DECISIONS.md`."
+    },
+    {
+      "slug": "campus-vkcube",
+      "title": "Confirm `vkcube` runs on a 42 Madrid campus machine",
+      "phase": "5 · Mandatory finish",
+      "labels": [
+        "defence"
+      ],
+      "body": "The defence runs on campus hardware. Check early that Vulkan works there, not on the day."
+    },
+    {
+      "slug": "readme-ai-usage",
+      "title": "Final README: Description, Instructions, Resources, AI usage",
+      "phase": "5 · Mandatory finish",
+      "labels": [
+        "defence"
+      ],
+      "body": "Written at the end. AI usage must state that Claude wrote the checkpoint code from § 1 onwards (method change 2026-11-03), as subject chapter II requires."
+    },
+    {
+      "slug": "defence-prep",
+      "title": "Defence prep: collect traps and decisions",
+      "phase": "5 · Mandatory finish",
+      "labels": [
+        "defence"
+      ],
+      "body": "Fill `00-PLAN.md → Defence prep` from `DECISIONS.md` and each section's Known traps as sections close."
+    }
+  ]
+}

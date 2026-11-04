@@ -50,3 +50,14 @@ and doesn't expect to hand-write code in practice.
 errors and your own code); defence risk if any line can't be explained; README must
 declare which parts were AI-generated (subject chapter II).
 **Revisit if:** explain-back questions start getting missed, or debugging stalls.
+
+## 2026-11-04 — GitHub issues as a view of the learning plan
+**Chose:** one issue per section (workflow checklist in the body), labels for
+status/tier/area/ES, one milestone per phase — generated and re-synced by
+`scripts/learn_issues.py` from `00-PLAN.md`, `PROGRESS.md` and `learn/issues.json`.
+**Rejected:** issues as the source of truth (state would split between GitHub and
+`PROGRESS.md`); a GitHub Projects board (needs GraphQL, more setup for one person).
+**Why:** a checkable, at-a-glance view without a second place to keep state in sync by hand.
+**Cost accepted:** must run `sync` after updating `PROGRESS.md`; body checklists are
+ticked by hand and are never rewritten by the script.
+**Revisit if:** the checklists drift from reality, or a teammate joins.
