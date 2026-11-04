@@ -1,0 +1,30 @@
+# Rust / Cargo build output
+/target/
+**/*.rs.bk
+# (Cargo.lock is committed on purpose: this is an application, so builds stay reproducible)
+
+# Compiled shaders (generated from GLSL by glslc)
+*.spv
+
+# AI-agent files (not part of the deliverable)
+CLAUDE.md
+**/CLAUDE.md
+.claude/
+PROJECT_MAP.md
+scripts/check_learn.py
+
+# Personal practice / scratch
+practice/
+out.txt
+
+# Subject PDF
+scop.pdf
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
