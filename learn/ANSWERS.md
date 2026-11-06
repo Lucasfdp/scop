@@ -136,3 +136,40 @@ again.
 window's display handle, and (2) **choosing the physical device / queue family** needs
 the surface, which is created from the window — you must check the family can present
 to it. Since `winit` only gives you the window in `resumed`, Vulkan setup moves there.
+
+## Section 5
+
+**A-5.1** **Fence:** the GPU signals it when a submitted batch finishes; the **CPU**
+waits on it (`wait_for_fences`). It's how your code knows it may reuse a command buffer.
+**Semaphore:** signalled by the GPU (or by `acquire`, when the image comes off screen);
+waited on by the **GPU** (a submit) or the **presentation engine** (a present). The CPU
+never waits on a binary semaphore — it only names which ones to use.
+
+**A-5.2** It **hangs on the first frame**. The first thing the frame does is
+`wait_for_fences` on its slot's fence — but nothing has ever been submitted with that
+fence, so nothing will ever signal it. The CPU waits forever: the window opens but stays
+blank and stops responding. Creating fences `SIGNALED` means "the previous (imaginary)
+use of this slot is already finished", so the first wait passes at once.
+
+**A-5.3** **wait for fence → acquire → reset fence → record → submit → present.**
+- *acquire* is told to raise `image_free` when the image is really off screen.
+- *submit* **waits on** `image_free` (at the transfer stage), **raises** `render_done`
+  for that image, and switches on the fence when the commands finish.
+- *present* **waits on** `render_done`.
+Reset comes after acquire so an early return on out-of-date never leaves the fence off
+with no job to switch it on.
+
+**A-5.4** Validation reports that the presented image is in the wrong layout — roughly
+"`vkQueuePresentKHR`: image is in `VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL`, expected
+`VK_IMAGE_LAYOUT_PRESENT_SRC_KHR`" (`VUID-VkPresentInfoKHR-pImageIndices-01430`). Without
+validation the result is **undefined**: often it looks fine (many desktop drivers use the
+same memory arrangement for both), sometimes you get garbage, black, or the previous
+frame. "It looked fine on my machine" is exactly how this bug reaches the defence on a
+different GPU.
+
+**A-5.5** With one frame in flight the CPU records frame N, submits it, and at the start
+of frame N+1 **waits on the fence until the GPU has finished frame N** — it sits idle
+while the GPU draws, and then the GPU sits idle while the CPU records. A second set of
+objects (command buffer, fence, `image_free`) lets the CPU record frame N+1 into the
+*other* command buffer while the GPU is still drawing frame N, so both stay busy. It
+only waits when it gets two whole frames ahead.

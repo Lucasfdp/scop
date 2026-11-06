@@ -380,3 +380,87 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 **Plain:** how the OS should treat your image's transparency when it layers your window over the rest of the screen. `OPAQUE` = ignore it, the window is solid.
 **Precise:** `VkCompositeAlphaFlagBitsKHR`, chosen at swapchain creation from `supported_composite_alpha` in the surface capabilities.
 **Introduced in:** § 4
+
+---
+
+## Section 5 — Giving the GPU work, and waiting
+
+### command pool
+**Plain:** the memory command buffers are carved from; one per queue family.
+**Precise:** `VkCommandPool`; `RESET_COMMAND_BUFFER` lets you reset buffers one at a time. Destroying the pool frees its buffers.
+**Introduced in:** § 5
+
+### recording
+**Plain:** writing instructions into a command buffer between `begin` and `end`. Nothing runs on the GPU yet.
+**Precise:** every `cmd_*` call (`cmd_clear_color_image`, `cmd_pipeline_barrier`, …).
+**Introduced in:** § 5
+
+### vkQueueSubmit
+**Plain:** hand command buffers to a queue; returns at once, the GPU runs them later.
+**Precise:** also names semaphores to wait on (and at which stage), semaphores to signal, and one fence to signal when done.
+**Introduced in:** § 5
+
+### fence
+**Plain:** a signal from the GPU to the CPU: "that batch of work is finished". **GPU signals, CPU waits.**
+**Precise:** `VkFence`; `wait_for_fences` / `reset_fences`. Create frame fences `SIGNALED` or the first frame waits forever.
+**Introduced in:** § 5
+
+### semaphore
+**Plain:** a signal between GPU jobs (or the GPU and the screen): "you may go now". **GPU signals, GPU/presentation waits** — the CPU never waits on it. Named after railway semaphore signals.
+**Precise:** `VkSemaphore` (binary). scop uses `image_free` (per frame in flight) and `render_done` (per swapchain image).
+**Introduced in:** § 5
+
+### acquire
+**Plain:** ask the swapchain which image to draw into next; you get the index at once, and a semaphore is raised when the image is really off screen.
+**Precise:** `vkAcquireNextImageKHR`; may return `ERROR_OUT_OF_DATE_KHR` or report suboptimal.
+**Introduced in:** § 5
+
+### frames in flight
+**Plain:** how many frames the CPU may work ahead of the GPU. 2 lets the CPU record the next frame while the GPU draws the current one.
+**Precise:** each frame slot has its own command buffer, fence and `image_free` semaphore.
+**Introduced in:** § 5
+
+### image layout
+**Plain:** how an image's pixels are arranged in GPU memory for a particular job (being written, being drawn into, being shown).
+**Precise:** `UNDEFINED`, `TRANSFER_DST_OPTIMAL`, `COLOR_ATTACHMENT_OPTIMAL`, `PRESENT_SRC_KHR`, …
+**Introduced in:** § 5
+
+### layout transition
+**Plain:** switching an image from one layout to another, as a recorded GPU command.
+**Precise:** done with an image memory barrier inside `cmd_pipeline_barrier`.
+**Introduced in:** § 5
+
+### pipeline barrier
+**Plain:** "everything of this kind before here must finish before anything of that kind after here starts" — plus, optionally, a layout change.
+**Precise:** `vkCmdPipelineBarrier` with source/destination stages and access masks.
+**Introduced in:** § 5
+
+### pipeline stage
+**Plain:** one step on the GPU's production line; barriers and waits name stages so only the work that must wait does.
+**Precise:** `TRANSFER`, `COLOR_ATTACHMENT_OUTPUT`, `TOP_OF_PIPE`, `BOTTOM_OF_PIPE`, …
+**Introduced in:** § 5
+
+### access mask
+**Plain:** which kind of memory access must be finished and made visible. Stage = *when*, access = *what*.
+**Precise:** `TRANSFER_WRITE`, `COLOR_ATTACHMENT_WRITE`, `SHADER_READ`, …; tells the GPU which caches to flush.
+**Introduced in:** § 5
+
+### vkCmdClearColorImage
+**Plain:** fill a whole image with one colour; no shaders needed.
+**Precise:** a transfer command; the image must be in `TRANSFER_DST_OPTIMAL` and have `TRANSFER_DST` usage.
+**Introduced in:** § 5
+
+### TRANSFER_DST
+**Plain:** "transfer destination" — an image usage flag allowing copies and clears into it.
+**Precise:** `vk::ImageUsageFlags::TRANSFER_DST`; must be requested at swapchain creation and supported by the surface.
+**Introduced in:** § 5
+
+### device_wait_idle
+**Plain:** wait until the GPU has finished everything. For shutdown, never for every frame.
+**Precise:** `vkDeviceWaitIdle`.
+**Introduced in:** § 5
+
+### RedrawRequested
+**Plain:** the `winit` event "draw this window now"; calling `window.request_redraw()` after each frame makes a continuous loop.
+**Precise:** `WindowEvent::RedrawRequested`.
+**Introduced in:** § 5

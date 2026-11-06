@@ -47,5 +47,6 @@
 - § 1 weak spots: dangling raw pointer from a dropped local; drop order of locals vs struct fields.
 - Confirm `vkcube` runs on a 42 Madrid campus machine (evaluation environment).
 - MoltenVK reports **Vulkan 1.2.357** on the M2 (2026-11-05, from the § 3 checkpoint) —
-  input for § 5's dynamic rendering vs render passes decision.
+  input for the dynamic rendering vs render passes decision, **moved to § 6** (§ 5 clears
+  with `vkCmdClearColorImage`, which needs neither). Present trade-offs before § 6's checkpoint.
 - Bonus extras (§ 19): deliberately undecided.
