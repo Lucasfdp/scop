@@ -1,6 +1,7 @@
 use std::env;
 use std::process::ExitCode;
 
+use engine::gpu::GpuContext;
 use engine::platform::{self, WindowConfig};
 
 fn main() -> ExitCode {
@@ -19,6 +20,21 @@ fn main() -> ExitCode {
         }
     };
     println!("{path}: {} lines", text.lines().count());
+
+    // Before the window for now; § 4 moves this into the window's `resumed`.
+    let gpu = match GpuContext::new(c"scop") {
+        Ok(gpu) => gpu,
+        Err(err) => {
+            eprintln!("scop: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (major, minor, patch) = gpu.api_version();
+    println!(
+        "GPU: {} (Vulkan {major}.{minor}.{patch}), graphics queue family {}",
+        gpu.gpu_name(),
+        gpu.queue_family_index()
+    );
 
     let config = WindowConfig {
         title: String::from("scop"),

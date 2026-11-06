@@ -1,5 +1,6 @@
 //! engine — reusable rendering engine for scop and future projects.
 
+pub mod gpu;
 pub mod platform;
 
 use std::fs;
