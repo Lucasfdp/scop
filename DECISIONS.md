@@ -61,3 +61,20 @@ status/tier/area/ES, one milestone per phase — generated and re-synced by
 **Cost accepted:** must run `sync` after updating `PROGRESS.md`; body checklists are
 ticked by hand and are never rewritten by the script.
 **Revisit if:** the checklists drift from reality, or a teammate joins.
+
+## 2026-11-06 — `ash-window` for surface creation (not hand-written)
+**Chose:** `ash-window` (pinned `=0.13.0`, with `raw-window-handle` `=0.6.2`): it lists
+the window-system instance extensions and creates the `VkSurfaceKHR` from `winit`'s
+window handles.
+**Rejected:** writing surface creation by hand — on macOS that means attaching a
+`CAMetalLayer` to the window through Objective-C calls, plus separate X11/Wayland code
+for the campus machines. All platform glue, no rendering knowledge.
+**Why:** it is window management — the one category the subject allows libraries for.
+It contains no loading, maths, shader or rendering logic (two functions, ~200 lines,
+maintained by the `ash` authors).
+**Defence argument:** "A surface is the link between Vulkan and the OS window; this
+crate only translates winit's window handle into that link. Everything Vulkan draws
+is my code."
+**Cost accepted:** one more dependency an evaluator might question.
+**Revisit if:** an evaluator rejects it, or out of interest later — write the macOS
+path by hand.

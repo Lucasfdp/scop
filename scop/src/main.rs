@@ -21,31 +21,33 @@ fn main() -> ExitCode {
     };
     println!("{path}: {} lines", text.lines().count());
 
-    // Before the window for now; § 4 moves this into the window's `resumed`.
-    let gpu = match GpuContext::new(c"scop") {
-        Ok(gpu) => gpu,
-        Err(err) => {
-            eprintln!("scop: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let (major, minor, patch) = gpu.api_version();
-    println!(
-        "GPU: {} (Vulkan {major}.{minor}.{patch}), graphics queue family {}",
-        gpu.gpu_name(),
-        gpu.queue_family_index()
-    );
-
     let config = WindowConfig {
         title: String::from("scop"),
         width: 1280,
         height: 720,
     };
-    match platform::run(config) {
+    match platform::run(config, print_gpu_info) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("scop: {err}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// Called once the window and the GPU are both set up (§ 3 and § 4 checkpoints).
+fn print_gpu_info(gpu: &GpuContext) {
+    let (major, minor, patch) = gpu.api_version();
+    let (width, height) = gpu.extent();
+    println!(
+        "GPU: {} (Vulkan {major}.{minor}.{patch}), queue family {}",
+        gpu.gpu_name(),
+        gpu.queue_family_index()
+    );
+    println!(
+        "swapchain: {:?}, {:?}, {width}x{height}, {} images",
+        gpu.swapchain_format(),
+        gpu.present_mode(),
+        gpu.image_count()
+    );
 }

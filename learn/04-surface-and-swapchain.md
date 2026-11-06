@@ -175,6 +175,15 @@ Three queries:
 | Composite alpha | `OPAQUE` if supported, else the first supported | The window isn't see-through |
 | Clipped | `true` | Don't draw pixels hidden by other windows |
 
+**Composite alpha, decoded.** *Alpha* is a pixel's fourth value after red, green and
+blue: how opaque it is (0 = invisible, 1 = solid). The *compositor* is the part of the
+operating system that layers all windows into the final screen image. *Composite alpha*
+tells it what to do with your image's alpha when it layers your window over whatever
+is behind it: `OPAQUE` (ignore alpha — the window is solid), `PRE_MULTIPLIED` /
+`POST_MULTIPLIED` (honour alpha — see-through windows; the two differ in whether your
+colours were already multiplied by alpha), `INHERIT` (let the window system decide).
+scop wants a solid window, so `OPAQUE`.
+
 Then create the swapchain through `ash::khr::swapchain::Device` (the swapchain
 extension's function table), and fetch its images.
 

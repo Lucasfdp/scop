@@ -1,12 +1,17 @@
-//! GPU context: the Vulkan loader, instance, debug messenger and logical device.
+//! GPU context: the Vulkan loader, instance, debug messenger, window surface,
+//! logical device and swapchain.
 //!
-//! Creation order: loader → instance → debug messenger → physical device (chosen)
-//! → logical device → queue (fetched). `Drop` destroys in the mirror order.
+//! Creation order: loader → instance → debug messenger → surface → physical device
+//! (chosen) → logical device → queue (fetched) → swapchain → image views.
+//! `Drop` destroys in the mirror order.
 
-use std::ffi::{CStr, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::fmt;
 
 use ash::{Device, Entry, Instance, ext, khr, vk};
+use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
+
+use crate::swapchain::Swapchain;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
@@ -17,8 +22,10 @@ pub enum GpuError {
     Load(ash::LoadingError),
     /// A Vulkan call returned an error code.
     Vulkan(vk::Result),
-    /// No GPU has a queue family that can draw.
+    /// No GPU has a queue family that can draw *and* present to the window.
     NoSuitableGpu,
+    /// The window couldn't hand over its platform handles.
+    WindowHandle(HandleError),
 }
 
 impl fmt::Display for GpuError {
@@ -26,7 +33,10 @@ impl fmt::Display for GpuError {
         match self {
             GpuError::Load(e) => write!(f, "could not load the Vulkan library: {e}"),
             GpuError::Vulkan(e) => write!(f, "Vulkan error: {e}"),
-            GpuError::NoSuitableGpu => write!(f, "no GPU with a graphics queue found"),
+            GpuError::NoSuitableGpu => {
+                write!(f, "no GPU can both draw and present to this window")
+            }
+            GpuError::WindowHandle(e) => write!(f, "could not get the window's handles: {e}"),
         }
     }
 }
@@ -39,6 +49,12 @@ impl From<ash::LoadingError> for GpuError {
     }
 }
 
+impl From<HandleError> for GpuError {
+    fn from(e: HandleError) -> Self {
+        GpuError::WindowHandle(e)
+    }
+}
+
 impl From<vk::Result> for GpuError {
     fn from(e: vk::Result) -> Self {
         GpuError::Vulkan(e)
@@ -48,30 +64,59 @@ impl From<vk::Result> for GpuError {
 /// Owns every Vulkan object needed before anything can be drawn.
 ///
 /// Deliberately not `Clone` or `Copy`: one owner, so one destroy.
+/// **Must be dropped before the window it was created from** (the surface points at it).
 pub struct GpuContext {
     _entry: Entry, // keeps the loader library open for as long as the instance lives
     instance: Instance,
     debug: Option<DebugMessenger>,
+    surface_loader: khr::surface::Instance,
+    surface: vk::SurfaceKHR,
     physical_device: vk::PhysicalDevice,
     device: Device,
     queue: vk::Queue,
     queue_family_index: u32,
+    swapchain_loader: khr::swapchain::Device,
+    swapchain: Swapchain,
 }
 
 impl GpuContext {
-    /// Loads Vulkan, creates the instance (validation in debug builds),
-    /// picks a GPU with a graphics queue and opens a logical device on it.
-    pub fn new(app_name: &CStr) -> Result<Self, GpuError> {
+    /// Sets up Vulkan for drawing into `window`.
+    ///
+    /// `size` is the window's size in **physical** pixels (not logical points).
+    /// The caller must drop the returned context before dropping the window.
+    pub fn new(
+        app_name: &CStr,
+        window: &(impl HasDisplayHandle + HasWindowHandle),
+        size: (u32, u32),
+    ) -> Result<Self, GpuError> {
+        let display_handle = window.display_handle()?.as_raw();
+        let window_handle = window.window_handle()?.as_raw();
+        // The instance extensions this platform's windows need
+        // (on macOS: VK_KHR_surface + VK_EXT_metal_surface).
+        let window_extensions = ash_window::enumerate_required_extensions(display_handle)?;
+
         let entry = load_entry()?;
 
-        let validation = cfg!(debug_assertions) && has_layer(&entry, VALIDATION_LAYER)?;
+        let mut validation = cfg!(debug_assertions) && has_layer(&entry, VALIDATION_LAYER)?;
         if cfg!(debug_assertions) && !validation {
             eprintln!("warning: validation layer not found, running without it");
         }
         let portability = has_instance_extension(&entry, khr::portability_enumeration::NAME)?;
 
-        let instance = create_instance(&entry, app_name, validation, portability)?;
+        // The layer can be listed (its JSON description was found) yet fail to load
+        // (its library wasn't). Run without it rather than refusing to start.
+        let instance =
+            match create_instance(&entry, app_name, window_extensions, validation, portability) {
+                Err(GpuError::Vulkan(vk::Result::ERROR_LAYER_NOT_PRESENT)) if validation => {
+                    eprintln!("warning: validation layer failed to load, running without it");
+                    validation = false;
+                    create_instance(&entry, app_name, window_extensions, validation, portability)?
+                }
+                result => result?,
+            };
 
+        // From here on, `Drop` can't clean up if a step fails (there's no struct yet),
+        // so each failure destroys what already exists, children first, by hand.
         let debug = if validation {
             match create_debug_messenger(&entry, &instance) {
                 Ok(d) => Some(d),
@@ -84,35 +129,81 @@ impl GpuContext {
             None
         };
 
-        // If a later step fails, `Drop` can't run (there's no struct yet),
-        // so whatever already exists is destroyed by hand before returning.
-        let (physical_device, queue_family_index) = match pick_physical_device(&instance) {
-            Ok(found) => found,
+        let surface_loader = khr::surface::Instance::new(&entry, &instance);
+        // SAFETY: the handles come from a live window that the caller keeps alive
+        // for longer than this context.
+        let surface = match unsafe {
+            ash_window::create_surface(&entry, &instance, display_handle, window_handle, None)
+        } {
+            Ok(s) => s,
             Err(e) => {
                 destroy_instance_level(&instance, &debug);
-                return Err(e);
+                return Err(e.into());
             }
         };
-        let device = match create_device(&instance, physical_device, queue_family_index) {
-            Ok(d) => d,
-            Err(e) => {
-                destroy_instance_level(&instance, &debug);
-                return Err(e);
-            }
+        let fail = |e: GpuError| -> GpuError {
+            // SAFETY: nothing created from the surface exists yet.
+            unsafe { surface_loader.destroy_surface(surface, None) };
+            destroy_instance_level(&instance, &debug);
+            e
         };
+
+        let (physical_device, queue_family_index) =
+            pick_physical_device(&instance, &surface_loader, surface).map_err(&fail)?;
+        let device =
+            create_device(&instance, physical_device, queue_family_index).map_err(&fail)?;
 
         // SAFETY: family `queue_family_index` was requested with 1 queue, so index 0 exists.
         let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
+
+        let swapchain_loader = khr::swapchain::Device::new(&instance, &device);
+        let swapchain = Swapchain::new(
+            &device,
+            &swapchain_loader,
+            &surface_loader,
+            surface,
+            physical_device,
+            size,
+        )
+        .map_err(|e| {
+            // SAFETY: the swapchain cleaned up after itself; nothing else uses the device.
+            unsafe { device.destroy_device(None) };
+            fail(e)
+        })?;
 
         Ok(GpuContext {
             _entry: entry,
             instance,
             debug,
+            surface_loader,
+            surface,
             physical_device,
             device,
             queue,
             queue_family_index,
+            swapchain_loader,
+            swapchain,
         })
+    }
+
+    /// Format of the swapchain images (e.g. `B8G8R8A8_SRGB`).
+    pub fn swapchain_format(&self) -> vk::Format {
+        self.swapchain.format.format
+    }
+
+    /// How finished images are handed to the screen (e.g. `FIFO`).
+    pub fn present_mode(&self) -> vk::PresentModeKHR {
+        self.swapchain.present_mode
+    }
+
+    /// Size of the swapchain images in physical pixels.
+    pub fn extent(&self) -> (u32, u32) {
+        (self.swapchain.extent.width, self.swapchain.extent.height)
+    }
+
+    /// How many images the swapchain actually created (may be more than asked for).
+    pub fn image_count(&self) -> usize {
+        self.swapchain.images.len()
     }
 
     /// The GPU's name as the driver reports it (e.g. "Apple M2").
@@ -157,7 +248,11 @@ impl Drop for GpuContext {
     fn drop(&mut self) {
         // SAFETY: mirror of creation order; children before parents; each object
         // is owned only by this struct, so each is destroyed exactly once.
-        unsafe { self.device.destroy_device(None) };
+        unsafe {
+            self.swapchain.destroy(&self.device, &self.swapchain_loader);
+            self.device.destroy_device(None);
+            self.surface_loader.destroy_surface(self.surface, None);
+        }
         destroy_instance_level(&self.instance, &self.debug);
     }
 }
@@ -223,6 +318,7 @@ fn has_instance_extension(entry: &Entry, name: &CStr) -> Result<bool, GpuError> 
 fn create_instance(
     entry: &Entry,
     app_name: &CStr,
+    window_extensions: &[*const c_char],
     validation: bool,
     portability: bool,
 ) -> Result<Instance, GpuError> {
@@ -234,7 +330,7 @@ fn create_instance(
         .api_version(vk::API_VERSION_1_2);
 
     // Pointers into 'static data (constants and c"" literals), so they never dangle.
-    let mut extensions = Vec::new();
+    let mut extensions = window_extensions.to_vec();
     let mut flags = vk::InstanceCreateFlags::empty();
     if portability {
         extensions.push(khr::portability_enumeration::NAME.as_ptr());
@@ -311,20 +407,42 @@ unsafe extern "system" fn debug_callback(
     vk::FALSE // "don't abort the call that triggered this"
 }
 
-/// Returns the first GPU with a graphics queue family, and that family's index.
-fn pick_physical_device(instance: &Instance) -> Result<(vk::PhysicalDevice, u32), GpuError> {
-    // SAFETY: plain queries on a live instance.
+/// Returns the first GPU that supports the swapchain extension and has one queue
+/// family that can both draw and present to `surface`, plus that family's index.
+fn pick_physical_device(
+    instance: &Instance,
+    surface_loader: &khr::surface::Instance,
+    surface: vk::SurfaceKHR,
+) -> Result<(vk::PhysicalDevice, u32), GpuError> {
+    // SAFETY: plain queries on a live instance and surface.
     let devices = unsafe { instance.enumerate_physical_devices()? };
     for device in devices {
+        if !has_device_extension(instance, device, khr::swapchain::NAME)? {
+            continue;
+        }
         let families = unsafe { instance.get_physical_device_queue_family_properties(device) };
-        let graphics = families
-            .iter()
-            .position(|f| f.queue_flags.contains(vk::QueueFlags::GRAPHICS));
-        if let Some(index) = graphics {
-            return Ok((device, index as u32));
+        for (index, family) in families.iter().enumerate() {
+            let index = index as u32;
+            let draws = family.queue_flags.contains(vk::QueueFlags::GRAPHICS);
+            let presents = unsafe {
+                surface_loader.get_physical_device_surface_support(device, index, surface)?
+            };
+            if draws && presents {
+                return Ok((device, index));
+            }
         }
     }
     Err(GpuError::NoSuitableGpu)
+}
+
+fn has_device_extension(
+    instance: &Instance,
+    device: vk::PhysicalDevice,
+    name: &CStr,
+) -> Result<bool, GpuError> {
+    // SAFETY: plain query on a live instance.
+    let exts = unsafe { instance.enumerate_device_extension_properties(device)? };
+    Ok(exts.iter().any(|e| e.extension_name_as_c_str() == Ok(name)))
 }
 
 fn create_device(
@@ -332,14 +450,10 @@ fn create_device(
     physical_device: vk::PhysicalDevice,
     queue_family_index: u32,
 ) -> Result<Device, GpuError> {
-    // MoltenVK lists VK_KHR_portability_subset and requires it to be enabled if listed.
-    // SAFETY: plain query on a live instance.
-    let available = unsafe { instance.enumerate_device_extension_properties(physical_device)? };
-    let mut extensions = Vec::new();
-    if available
-        .iter()
-        .any(|e| e.extension_name_as_c_str() == Ok(khr::portability_subset::NAME))
-    {
+    // Swapchain: checked by `pick_physical_device`. Portability subset: MoltenVK
+    // lists it and requires it to be enabled if listed.
+    let mut extensions = vec![khr::swapchain::NAME.as_ptr()];
+    if has_device_extension(instance, physical_device, khr::portability_subset::NAME)? {
         extensions.push(khr::portability_subset::NAME.as_ptr());
     }
 

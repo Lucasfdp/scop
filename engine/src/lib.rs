@@ -2,6 +2,7 @@
 
 pub mod gpu;
 pub mod platform;
+mod swapchain;
 
 use std::fs;
 use std::io;

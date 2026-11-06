@@ -375,3 +375,8 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 ### ERROR_OUT_OF_DATE_KHR
 **Plain:** "the swapchain no longer matches the window" — rebuild it. Sibling: `SUBOPTIMAL_KHR`.
 **Introduced in:** § 4
+
+### composite alpha
+**Plain:** how the OS should treat your image's transparency when it layers your window over the rest of the screen. `OPAQUE` = ignore it, the window is solid.
+**Precise:** `VkCompositeAlphaFlagBitsKHR`, chosen at swapchain creation from `supported_composite_alpha` in the surface capabilities.
+**Introduced in:** § 4
