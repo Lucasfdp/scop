@@ -78,3 +78,28 @@ is my code."
 **Cost accepted:** one more dependency an evaluator might question.
 **Revisit if:** an evaluator rejects it, or out of interest later — write the macOS
 path by hand.
+
+## 2026-11-07 — Dynamic rendering (not render passes)
+**Chose:** `VK_KHR_dynamic_rendering` (an extension on MoltenVK's Vulkan 1.2; core from
+1.3): drawing starts with `cmd_begin_rendering` naming the image view directly.
+**Rejected:** `VkRenderPass` + one `VkFramebuffer` per swapchain image (Vulkan 1.0 style).
+**Why:** fewer objects; nothing extra to rebuild on resize (§ 16); pipelines only need the
+attachment *formats*; continues § 5's hand-written layout barriers; the direction Vulkan
+and modern engines have taken — better for ft_vox / ft_minecraft (shadow maps,
+post-processing = more passes).
+**Cost accepted:** needs driver support (checked at startup, clear error if missing);
+gives up subpasses (a tile-GPU optimisation that matters on mobile, not here).
+**Confirmed:** `vkcube` runs on the 42 Madrid campus machines (2026-11-07).
+**Revisit if:** a campus driver lacks the extension.
+
+## 2026-11-07 — Shaders compiled by `build.rs` with `glslc`, embedded in the binary
+**Chose:** a Cargo build script runs `glslc` (GLSL → SPIR-V) on every shader in
+`scop/shaders/`; the bytes are embedded with `include_bytes!` and turned into SPIR-V
+words by our own loader (no `ash::util::read_spv`).
+**Rejected:** a Makefile-only compile step (`cargo run` alone would use stale shaders);
+committing pre-built `.spv` files (easy to forget to rebuild).
+**Why:** `cargo build` can't forget; no runtime file paths to break at the defence.
+**Defence argument:** `glslc` is a compiler run at build time, like `rustc` — not a
+library linked into scop. Shader *loading* (bytes → validated SPIR-V words → shader
+module) is our own code, as the subject requires.
+**Cost accepted:** `glslc` must be installed (the Makefile installs it, § 16).

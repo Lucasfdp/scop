@@ -143,6 +143,34 @@ Calling it at the end of every frame gives you a continuous loop.
 
 ## How it actually works
 
+### Frames, frame slots and images — three different things
+
+These get mixed up easily, so pin them down first:
+
+- **A frame** is one trip through the loop: one picture drawn and shown. It happens
+  ~60 times a second, forever.
+- **A frame slot** (2 of them — "frames in flight") is *your* reusable kit: one
+  instruction sheet (command buffer), one desk light (fence), one "image free" flag
+  (semaphore). You pick slots **in turn**: 0, 1, 0, 1… Two slots means the CPU can be
+  at most two frames ahead of the GPU.
+- **A swapchain image** (3 on your Mac) is a *canvas*: actual pixels the screen shows.
+  You don't pick it — **acquire tells you** which one is free, in whatever order the
+  presentation engine hands them back. Each image has its own view (§ 4) and its own
+  "render done" flag.
+
+| Loop | Frame slot (you pick, in turn) | Image (acquire picks) |
+|---|---|---|
+| 1 | slot 0 | image 0 |
+| 2 | slot 1 | image 1 |
+| 3 | slot 0 | image 2 |
+| 4 | slot 1 | image 0 |
+| 5 | slot 0 | image 1 |
+
+The two counts are independent: **3 images** is how many canvases take turns on screen
+(the swapchain decided, § 4); **2 slots** is how far ahead you let the CPU run (your
+choice). Rule of thumb for *where an object belongs*: if the **CPU reuses it**, it's per
+slot; if the **screen holds on to it**, it's per image.
+
 ### The whole frame, at a glance
 
 ```

@@ -2,8 +2,8 @@
 //! logical device and swapchain.
 //!
 //! Creation order: loader → instance → debug messenger → surface → physical device
-//! (chosen) → logical device → queue (fetched) → swapchain → image views.
-//! `Drop` destroys in the mirror order.
+//! (chosen) → logical device → queue (fetched) → swapchain → image views → frame slots.
+//! `Drop` waits for the GPU to go idle, then destroys in the mirror order.
 
 use std::ffi::{CStr, c_char, c_void};
 use std::fmt;
@@ -11,6 +11,7 @@ use std::fmt;
 use ash::{Device, Entry, Instance, ext, khr, vk};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 
+use crate::frames::{self, Frames};
 use crate::swapchain::Swapchain;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
@@ -26,6 +27,8 @@ pub enum GpuError {
     NoSuitableGpu,
     /// The window couldn't hand over its platform handles.
     WindowHandle(HandleError),
+    /// The GPU or surface lacks something scop needs.
+    Unsupported(&'static str),
 }
 
 impl fmt::Display for GpuError {
@@ -37,6 +40,7 @@ impl fmt::Display for GpuError {
                 write!(f, "no GPU can both draw and present to this window")
             }
             GpuError::WindowHandle(e) => write!(f, "could not get the window's handles: {e}"),
+            GpuError::Unsupported(what) => write!(f, "unsupported: {what}"),
         }
     }
 }
@@ -77,6 +81,18 @@ pub struct GpuContext {
     queue_family_index: u32,
     swapchain_loader: khr::swapchain::Device,
     swapchain: Swapchain,
+    frames: Frames,
+}
+
+/// What happened when a frame was drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameStatus {
+    /// Drawn and shown.
+    Presented,
+    /// Drawn and shown, but the swapchain no longer matches the window exactly.
+    Suboptimal,
+    /// Skipped: the swapchain no longer matches the window. Rebuilding comes in § 16.
+    OutOfDate,
 }
 
 impl GpuContext {
@@ -171,6 +187,15 @@ impl GpuContext {
             fail(e)
         })?;
 
+        let frames = Frames::new(&device, queue_family_index).map_err(|e| {
+            // SAFETY: Frames cleaned up after itself; nothing has been submitted yet.
+            unsafe {
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
+
         Ok(GpuContext {
             _entry: entry,
             instance,
@@ -183,9 +208,77 @@ impl GpuContext {
             queue_family_index,
             swapchain_loader,
             swapchain,
+            frames,
         })
     }
+    /// Draws one frame: clears the next swapchain image to `colour` (linear RGBA,
+    /// 0.0–1.0) and shows it. The § 5 loop, in order:
+    /// wait fence → acquire → reset fence → record → submit → present.
+    pub fn draw_frame(&mut self, colour: [f32; 4]) -> Result<FrameStatus, GpuError> {
+        let slot = self.frames.current();
 
+        // SAFETY: every handle below belongs to this context and is alive; the fence
+        // wait guarantees the GPU has finished with this slot's command buffer.
+        unsafe {
+            // 1. Wait until the GPU has finished the work last submitted from this slot.
+            self.device.wait_for_fences(&[slot.fence], true, u64::MAX)?;
+
+            // 2. Which image do we draw into? `image_free` is raised once it's off screen.
+            let acquired = self.swapchain_loader.acquire_next_image(
+                self.swapchain.handle,
+                u64::MAX,
+                slot.image_free,
+                vk::Fence::null(),
+            );
+            let (image_index, acquire_suboptimal) = match acquired {
+                Ok(result) => result,
+                // Return *before* resetting the fence, or this slot would wait forever.
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => return Ok(FrameStatus::OutOfDate),
+                Err(e) => return Err(e.into()),
+            };
+            let image = self.swapchain.images[image_index as usize];
+            let render_done = self.swapchain.render_done[image_index as usize];
+
+            // 3. Acquire succeeded, so we're definitely submitting: switch the light off.
+            self.device.reset_fences(&[slot.fence])?;
+
+            // 4. Write the instruction sheet.
+            frames::record_clear(&self.device, slot.command_buffer, image, colour)?;
+
+            // 5. Hand it over: wait for `image_free` before the clear (TRANSFER stage);
+            //    when finished, raise `render_done` and switch the fence on.
+            let wait_semaphores = [slot.image_free];
+            let wait_stages = [vk::PipelineStageFlags::TRANSFER];
+            let command_buffers = [slot.command_buffer];
+            let signal_semaphores = [render_done];
+            let submit = vk::SubmitInfo::default()
+                .wait_semaphores(&wait_semaphores)
+                .wait_dst_stage_mask(&wait_stages)
+                .command_buffers(&command_buffers)
+                .signal_semaphores(&signal_semaphores);
+            self.device
+                .queue_submit(self.queue, &[submit], slot.fence)?;
+
+            // 6. Ask for it to be shown once `render_done` is raised.
+            let swapchains = [self.swapchain.handle];
+            let image_indices = [image_index];
+            let present = vk::PresentInfoKHR::default()
+                .wait_semaphores(&signal_semaphores)
+                .swapchains(&swapchains)
+                .image_indices(&image_indices);
+            let presented = self.swapchain_loader.queue_present(self.queue, &present);
+
+            // The work is submitted whatever present said, so move on to the next slot.
+            self.frames.advance();
+
+            match presented {
+                Ok(false) if !acquire_suboptimal => Ok(FrameStatus::Presented),
+                Ok(_) => Ok(FrameStatus::Suboptimal),
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Ok(FrameStatus::OutOfDate),
+                Err(e) => Err(e.into()),
+            }
+        }
+    }
     /// Format of the swapchain images (e.g. `B8G8R8A8_SRGB`).
     pub fn swapchain_format(&self) -> vk::Format {
         self.swapchain.format.format
@@ -249,6 +342,10 @@ impl Drop for GpuContext {
         // SAFETY: mirror of creation order; children before parents; each object
         // is owned only by this struct, so each is destroyed exactly once.
         unsafe {
+            // Nothing may be destroyed while the GPU might still be using it. If the
+            // wait itself fails, the device is lost and there's nothing left to wait for.
+            let _ = self.device.device_wait_idle();
+            self.frames.destroy(&self.device);
             self.swapchain.destroy(&self.device, &self.swapchain_loader);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);

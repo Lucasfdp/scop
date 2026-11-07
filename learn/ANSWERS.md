@@ -173,3 +173,39 @@ while the GPU draws, and then the GPU sits idle while the CPU records. A second 
 objects (command buffer, fence, `image_free`) lets the CPU record frame N+1 into the
 *other* command buffer while the GPU is still drawing frame N, so both stay busy. It
 only waits when it gets two whole frames ahead.
+
+## Section 6
+
+**A-6.1** The vertex shader runs **3 times** — once per corner — and decides *where each
+corner lands* (`gl_Position`) plus what values it carries (the colour). The fragment
+shader runs **about 1000 times** — once per covered pixel — and decides *that pixel's
+colour*. That ratio is why expensive per-pixel work belongs in the vertex shader when it
+can: three runs instead of a thousand.
+
+**A-6.2** A **roughly equal mix of red, green and blue — a greyish white** (about a third
+of each). Neither of your programs mixed it: the **rasteriser** (fixed-function, the
+GPU's part) interpolated the three corner colours, weighted by distance, and handed the
+mixed value to your fragment shader, which just wrote it out. (With an sRGB swapchain,
+the mix looks lighter than a third would suggest — § 4 / § 5.)
+
+**A-6.3** **At the bottom.** OpenGL's y axis points up, Vulkan's NDC y points down, so
++0.5 is halfway towards the *bottom* edge. The whole triangle appears upside down
+compared with the tutorial's screenshot. Fix: flip the sign of y (or, later, put the
+flip in the projection matrix, § 10).
+
+**A-6.4** Any two of:
+- **Colour attachment format** in the pipeline's rendering info ← the swapchain's
+  `format`. Wrong → validation error at `begin_rendering`/draw; without validation,
+  undefined (garbage or nothing).
+- **Viewport and scissor** (set while recording) ← the swapchain's `extent`. Wrong size
+  → the triangle squashed into a corner (viewport) or cut off (scissor) — the Retina
+  "quarter of the window" look from § 4.
+- **Render area** in `begin_rendering` ← the extent. Too small → only part of the image
+  is cleared and drawn.
+
+**A-6.5** **Yes.** Saving changes a file in `scop/shaders/`; `cargo run` sees that the
+build script asked to rerun when that folder changes (`cargo:rerun-if-changed=shaders`),
+so it runs `build.rs`, which runs `glslc` and writes a new `.spv` into `OUT_DIR`. The
+`include_bytes!` in `main.rs` depends on that file, so scop is recompiled with the new
+bytes embedded, and the window shows a red triangle. If `glslc` reports an error in your
+GLSL, the *build* fails with that message — you never get a stale binary.

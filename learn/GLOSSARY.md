@@ -464,3 +464,115 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 **Plain:** the `winit` event "draw this window now"; calling `window.request_redraw()` after each frame makes a continuous loop.
 **Precise:** `WindowEvent::RedrawRequested`.
 **Introduced in:** § 5
+
+---
+
+## Section 6 — Programs that run on the GPU
+
+### shader module
+**Plain:** Vulkan's handle for one block of compiled shader code.
+**Precise:** `VkShaderModule`, created from SPIR-V words; can be destroyed once the pipeline is built.
+**Introduced in:** § 6
+
+### entry point
+**Plain:** the function a shader starts in — like `main` in C.
+**Precise:** named when building the pipeline (`c"main"`).
+**Introduced in:** § 6
+
+### build script
+**Plain:** `build.rs` — a small Rust program Cargo runs before compiling the crate. Ours compiles the shaders.
+**Precise:** prints `cargo:` lines to talk to Cargo, e.g. `cargo:rerun-if-changed=shaders`; writes outputs to `OUT_DIR`.
+**Introduced in:** § 6
+
+### glslc
+**Stands for:** GLSL compiler (Google's `shaderc` project).
+**Plain:** turns GLSL text into SPIR-V bytes. A build tool, not a library linked into scop.
+**Introduced in:** § 6
+
+### include_bytes!
+**Plain:** a Rust macro that copies a file's bytes into the program at compile time.
+**Precise:** gives `&'static [u8]`; with `concat!(env!("OUT_DIR"), "/x.spv")` it embeds build-script output.
+**Introduced in:** § 6
+
+### SPIR-V magic number
+**Plain:** the first 4 bytes every SPIR-V file starts with, `0x07230203` — a quick "is this really SPIR-V?" check.
+**Precise:** SPIR-V is a list of 32-bit little-endian words, so the size must be a multiple of 4.
+**Introduced in:** § 6
+
+### graphics pipeline
+**Plain:** the whole drawing production line — your shaders plus every fixed switch — built once and frozen.
+**Precise:** `VkPipeline` from `create_graphics_pipelines`. Changing a non-dynamic setting means a new pipeline.
+**Introduced in:** § 6
+
+### fixed-function state
+**Plain:** the switches for the pipeline stages you don't program (assembly, rasterisation, blending).
+**Introduced in:** § 6
+
+### input assembly
+**Plain:** how the stream of corners is grouped into shapes.
+**Precise:** topology `TRIANGLE_LIST` = every 3 vertices form one triangle.
+**Introduced in:** § 6
+
+### viewport
+**Plain:** the rectangle of the image that NDC's −1..+1 box is stretched onto.
+**Precise:** normally the whole swapchain extent; dynamic state in scop.
+**Introduced in:** § 6
+
+### scissor
+**Plain:** a rectangle outside of which pixels are thrown away. Viewport squashes, scissor cuts.
+**Introduced in:** § 6
+
+### dynamic state
+**Plain:** pipeline settings left out of the frozen pipeline and set while recording instead.
+**Precise:** scop: `VIEWPORT`, `SCISSOR` (so resizing needs no new pipeline).
+**Introduced in:** § 6
+
+### cull mode
+**Plain:** whether to skip triangles facing away from the camera.
+**Precise:** `NONE`, `BACK`, `FRONT`; which side is "front" is set by front face.
+**Introduced in:** § 6
+
+### front face
+**Plain:** which corner order (clockwise or counter-clockwise on screen) counts as facing you.
+**Introduced in:** § 6
+
+### colour write mask
+**Plain:** which colour channels (R, G, B, A) the pipeline may write. Defaults to none — forget it and nothing appears.
+**Introduced in:** § 6
+
+### pipeline layout
+**Plain:** the list of extra inputs (uniforms, textures) shaders may read. Empty for now, but required.
+**Precise:** `VkPipelineLayout`.
+**Introduced in:** § 6
+
+### dynamic rendering
+**Plain:** starting a drawing pass by naming the image views to draw into, directly in the command buffer.
+**Precise:** `cmd_begin_rendering` / `cmd_end_rendering`; replaces render-pass and framebuffer objects.
+**Introduced in:** § 6
+
+### VK_KHR_dynamic_rendering
+**Plain:** the device extension giving dynamic rendering on Vulkan 1.2 (built in from 1.3).
+**Precise:** needs the extension **and** the `dynamicRendering` feature enabled at device creation; functions come from `ash::khr::dynamic_rendering::Device`.
+**Introduced in:** § 6
+
+### load op / store op
+**Plain:** what happens to the image at the start (clear / keep / don't care) and end (keep / don't care) of drawing.
+**Precise:** `AttachmentLoadOp::CLEAR`, `AttachmentStoreOp::STORE` in scop.
+**Introduced in:** § 6
+
+### gl_VertexIndex
+**Plain:** built-in vertex shader input: which corner this run is for (0, 1, 2…).
+**Introduced in:** § 6
+
+### gl_Position
+**Plain:** built-in vertex shader output: where the corner lands, as (x, y, z, w).
+**Introduced in:** § 6
+
+### location
+**Plain:** a numbered slot linking a vertex shader output to a fragment shader input. Numbers must match; names don't matter.
+**Precise:** `layout(location = N)`.
+**Introduced in:** § 6
+
+### interpolation
+**Plain:** blending per-corner values across a triangle for each pixel, weighted by distance to each corner. Done by the rasteriser.
+**Introduced in:** § 6

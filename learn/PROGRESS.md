@@ -1,7 +1,7 @@
 # Progress
 
-**Current section:** 5
-**Last session:** 2026-11-06
+**Current section:** 6
+**Last session:** 2026-11-07
 
 ## Sections
 
@@ -11,7 +11,8 @@
 | 2 | done | passed; explain-back corrected: trait signatures are fixed, `From` impl (not App) does error conversion | 2026-11-04 | yes | Checkpoint code by Claude (winit 0.30.13); verified on Mac (Esc, keys, resize) |
 | 3 | done | passed after misses (destroy order; portability opt-in; Clone = copied handle → double destroy) — checkpoint code by Claude, verified on Mac (GPU line, validation leak test); explain-back passed with misses (only `?` calls `From`; get/enumerate vs create; push_next timing; queue-priorities list) | 2026-11-06 | paused | Q-3.2 narrowed to one sentence by owner's choice (no OS-level detail) |
 | 4 | done | passed after misses (why surfaces are an extension; request min+1 not 0; physical vs logical extent; 0×0 extent on minimise; instance needs window-system extensions) — checkpoint code by Claude, verified on Mac (B8G8R8A8_SRGB, FIFO, 2560x1440, 3 images) ; explain-back passed with misses (present check → swapchain creation; exists vs enabled; image-count clamp) | 2026-11-06 | paused | |
-| 5–19 | not written | — | | — | Written on arrival |
+| 5 | done | passed after misses (semaphores: CPU never waits; why unsignalled fence hangs; reset_fences between acquire and submit; final barrier = layout change) — checkpoint code by Claude, verified on Mac (pulsing blue, clean exit, unsignalled-fence hang test) ; explain-back passed with misses (access mask = what the next/previous work does to memory; render_done per image because the screen holds it; device_wait_idle = 'in use', not order) | 2026-11-07 | paused | Added 'frames, frame slots and images' explainer after confusion |
+| 6–19 | not written | — | | — | Written on arrival |
 
 ## Prerequisite audit (2026-11-02)
 - Rust: new. C/C++ and pointers: known.
@@ -28,6 +29,11 @@
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
 | Why the portability extension + flag exist (one sentence: loader hides MoltenVK unless you opt in) — fresh variant | § 3 | 0 | after § 5 |
+| Access masks: barrier 1 dst `TRANSFER_WRITE` / barrier 2 src `TRANSFER_WRITE` — what each orders — fresh variant | § 5 explain-back | 0 | after § 7 |
+| Why `device_wait_idle` before teardown (objects still *in use*, not wrong order) — fresh variant | § 5 explain-back | 0 | after § 7 |
+| Where `reset_fences` goes and why (after acquire, before submit) — fresh variant | § 5 | 0 | after § 7 |
+| Per slot vs per image: fence/command buffer/image_free vs render_done/view — fresh variant | § 5 | 0 | after § 7 |
+| Layout transitions are recorded pipeline barriers (TRANSFER_DST_OPTIMAL → PRESENT_SRC_KHR) — fresh variant | § 5 | 0 | after § 7 |
 | Draw-capable ≠ present-capable: which step fails if you skip the present check (swapchain creation) — fresh variant | § 4 explain-back | 0 | after § 6 |
 | Device extension exists vs enabled: why `create_device` must list `VK_KHR_swapchain` — fresh variant, own words | § 4 explain-back | 0 | after § 6 |
 | `choose_image_count` clamping: min+1, then `.min(max)` only if max > 0 — fresh variant | § 4 explain-back | 0 | after § 6 |
@@ -45,8 +51,6 @@
 ## Open threads
 - 2026-11-04: Spanish (learn_es/) paused from § 3 on, by owner's choice — catch up all sections at the end. `check_learn.py` parity errors for § 3+ are expected until then.
 - § 1 weak spots: dangling raw pointer from a dropped local; drop order of locals vs struct fields.
-- Confirm `vkcube` runs on a 42 Madrid campus machine (evaluation environment).
-- MoltenVK reports **Vulkan 1.2.357** on the M2 (2026-11-05, from the § 3 checkpoint) —
-  input for the dynamic rendering vs render passes decision, **moved to § 6** (§ 5 clears
-  with `vkCmdClearColorImage`, which needs neither). Present trade-offs before § 6's checkpoint.
+- ✅ 2026-11-07: `vkcube` runs on the 42 Madrid campus machines.
+- MoltenVK reports **Vulkan 1.2.357** on the M2. Decided 2026-11-07: dynamic rendering (via `VK_KHR_dynamic_rendering`) — see DECISIONS.md.
 - Bonus extras (§ 19): deliberately undecided.
