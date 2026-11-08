@@ -1,6 +1,6 @@
 # Progress
 
-**Current section:** 7
+**Current section:** 8
 **Last session:** 2026-11-08
 
 ## Sections
@@ -13,7 +13,8 @@
 | 4 | done | passed after misses (why surfaces are an extension; request min+1 not 0; physical vs logical extent; 0×0 extent on minimise; instance needs window-system extensions) — checkpoint code by Claude, verified on Mac (B8G8R8A8_SRGB, FIFO, 2560x1440, 3 images) ; explain-back passed with misses (present check → swapchain creation; exists vs enabled; image-count clamp) | 2026-11-06 | paused | |
 | 5 | done | passed after misses (semaphores: CPU never waits; why unsignalled fence hangs; reset_fences between acquire and submit; final barrier = layout change) — checkpoint code by Claude, verified on Mac (pulsing blue, clean exit, unsignalled-fence hang test) ; explain-back passed with misses (access mask = what the next/previous work does to memory; render_done per image because the screen holds it; device_wait_idle = 'in use', not order) | 2026-11-07 | paused | Added 'frames, frame slots and images' explainer after confusion |
 | 6 | done | passed after misses (rasteriser interpolates, not the fragment shader; size must match = viewport/scissor ← extent; build time vs run time: glslc errors stop the build) — checkpoint code by Claude verified on Mac (RGB triangle, write-mask test) ; explain-back passed with misses (include_bytes! copies bytes, not the path; length check guards words[0]; pipeline compiles its own copy of the shaders; wait at the first stage that touches the image) | 2026-11-07 | paused | Decisions: dynamic rendering, build.rs + glslc |
-| 7–19 | not written | — | | — | Written on arrival |
+| 7 | done | passed after misses (usage = what the GPU may do; 6 indices, corners stored once; submit returns before the copy runs; memory vs usage flags vs index type) — checkpoint code by Claude verified on Mac (4-colour quad, clean exit, index test) ; explain-back passed with misses (memory_type_bits = allowed types; upload fence/barrier vs frame loop; struct literals need every field) | 2026-11-08 | paused | Decision: staging → device-local |
+| 8–19 | not written | — | | — | Written on arrival |
 
 ## Prerequisite audit (2026-11-02)
 - Rust: new. C/C++ and pointers: known.
@@ -30,6 +31,9 @@
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
 | Why the portability extension + flag exist (one sentence: loader hides MoltenVK unless you opt in) — fresh variant | § 3 | 0 | after § 5 |
+| Upload vs frame loop: the upload's own fence (CPU: copy done) and barrier (copy visible to VERTEX_INPUT reads) are separate from § 5's per-frame sync — fresh variant | § 7 explain-back | 0 | after § 9 |
+| Memory flags vs usage flags vs index type — which goes where (fresh variant) | § 7 | 0 | after § 9 |
+| Upload is its own submit: staging stays in use until the copy's fence (fresh variant) | § 7 | 0 | after § 9 |
 | `include_bytes!` embeds bytes vs reading a path at run time — fresh variant | § 6 explain-back | 0 | after § 8 |
 | Why shader modules can be destroyed after pipeline creation (driver compiles its own copy) — fresh variant | § 6 explain-back | 0 | after § 8 |
 | Semaphore wait stage = first stage that touches the image — fresh variant | § 6 explain-back | 0 | after § 8 |

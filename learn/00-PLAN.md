@@ -118,5 +118,7 @@ out to be hard.
 <!-- Populated as sections complete. Source: DECISIONS.md + section traps. -->
 
 ## Deferred / v2
+- Engine (ft_vox+): skip staging when the GPU offers a `DEVICE_LOCAL | HOST_VISIBLE`
+  memory type (unified memory like the M2, or Resizable BAR on PC cards) — write directly.
 - Lighting (candidate bonus extra, decided in § 19).
 - Swapchain present-mode tuning, multiple frames in flight beyond 2.

@@ -1,7 +1,9 @@
 //! engine — reusable rendering engine for scop and future projects.
 
+mod buffer;
 mod frames;
 pub mod gpu;
+pub mod mesh;
 pub mod pipeline;
 pub mod platform;
 pub mod spirv;

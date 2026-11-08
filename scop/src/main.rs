@@ -2,13 +2,14 @@ use std::env;
 use std::process::ExitCode;
 
 use engine::gpu::GpuContext;
+use engine::mesh::{MeshData, Vertex};
 use engine::pipeline::Shaders;
 use engine::platform::{self, WindowConfig};
 
-/// The § 6 triangle's shaders, compiled by `build.rs` and embedded in the binary.
-const TRIANGLE: Shaders = Shaders {
-    vertex: include_bytes!(concat!(env!("OUT_DIR"), "/triangle.vert.spv")),
-    fragment: include_bytes!(concat!(env!("OUT_DIR"), "/triangle.frag.spv")),
+/// The mesh shaders, compiled by `build.rs` and embedded in the binary.
+const MESH_SHADERS: Shaders = Shaders {
+    vertex: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.vert.spv")),
+    fragment: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.frag.spv")),
 };
 
 fn main() -> ExitCode {
@@ -33,7 +34,7 @@ fn main() -> ExitCode {
         width: 1280,
         height: 720,
     };
-    match platform::run(config, TRIANGLE, print_gpu_info, pulsing_blue) {
+    match platform::run(config, MESH_SHADERS, quad(), print_gpu_info, pulsing_blue) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("scop: {err}");
@@ -64,4 +65,31 @@ fn print_gpu_info(gpu: &GpuContext) {
 fn pulsing_blue(seconds: f32) -> [f32; 4] {
     let wave = 0.5 + 0.5 * seconds.sin(); // 0.0 → 1.0 → 0.0 …
     [0.05, 0.1 + 0.2 * wave, 0.3 + 0.6 * wave, 1.0]
+}
+
+/// The § 7 checkpoint shape: a square from 4 shared corners and 6 indices.
+/// (Vulkan's y points down: −0.5 is the top.) § 12 replaces this with the `.obj`.
+fn quad() -> MeshData {
+    MeshData {
+        vertices: vec![
+            Vertex {
+                position: [-0.5, -0.5],
+                colour: [1.0, 0.0, 0.0],
+            }, // 0: top left, red
+            Vertex {
+                position: [0.5, -0.5],
+                colour: [0.0, 1.0, 0.0],
+            }, // 1: top right, green
+            Vertex {
+                position: [0.5, 0.5],
+                colour: [0.0, 0.0, 1.0],
+            }, // 2: bottom right, blue
+            Vertex {
+                position: [-0.5, 0.5],
+                colour: [1.0, 1.0, 0.0],
+            }, // 3: bottom left, yellow
+        ],
+        // § 7 checkpoint step 6: change one of these and watch the shape change.
+        indices: vec![0, 1, 2, 2, 3, 0],
+    }
 }

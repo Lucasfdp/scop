@@ -3,7 +3,7 @@
 //!
 //! Creation order: loader → instance → debug messenger → surface → physical device
 //! (chosen) → logical device → queue (fetched) → swapchain → image views → pipeline
-//! → frame slots.
+//! → frame slots → mesh buffers.
 //! `Drop` waits for the GPU to go idle, then destroys in the mirror order.
 
 use std::ffi::{CStr, c_char, c_void};
@@ -12,7 +12,9 @@ use std::fmt;
 use ash::{Device, Entry, Instance, ext, khr, vk};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 
+use crate::buffer::Uploader;
 use crate::frames::{self, FrameTarget, Frames};
+use crate::mesh::{Mesh, MeshData};
 use crate::pipeline::{Pipeline, Shaders};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
@@ -96,6 +98,7 @@ pub struct GpuContext {
     rendering_loader: khr::dynamic_rendering::Device,
     pipeline: Pipeline,
     frames: Frames,
+    mesh: Mesh,
 }
 
 /// What happened when a frame was drawn.
@@ -113,13 +116,15 @@ impl GpuContext {
     /// Sets up Vulkan for drawing into `window`.
     ///
     /// `size` is the window's size in **physical** pixels (not logical points);
-    /// `shaders` are the app's compiled SPIR-V, used to build the pipeline.
+    /// `shaders` are the app's compiled SPIR-V, used to build the pipeline;
+    /// `mesh` is uploaded to GPU memory once, here.
     /// The caller must drop the returned context before dropping the window.
     pub fn new(
         app_name: &CStr,
         window: &(impl HasDisplayHandle + HasWindowHandle),
         size: (u32, u32),
         shaders: Shaders,
+        mesh: &MeshData,
     ) -> Result<Self, GpuError> {
         let display_handle = window.display_handle()?.as_raw();
         let window_handle = window.window_handle()?.as_raw();
@@ -225,6 +230,27 @@ impl GpuContext {
             fail(e)
         })?;
 
+        // Which kinds of memory this GPU has (§ 7: buffers pick from these).
+        // SAFETY: plain query on a live instance.
+        let memory_types =
+            unsafe { instance.get_physical_device_memory_properties(physical_device) };
+        let uploader = Uploader {
+            device: &device,
+            memory_types: &memory_types,
+            pool: frames.pool(),
+            queue,
+        };
+        let mesh = Mesh::upload(&uploader, mesh).map_err(|e| {
+            // SAFETY: uploads wait for themselves; nothing is in use.
+            unsafe {
+                frames.destroy(&device);
+                pipeline.destroy(&device);
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
+
         Ok(GpuContext {
             _entry: entry,
             instance,
@@ -240,10 +266,11 @@ impl GpuContext {
             rendering_loader,
             pipeline,
             frames,
+            mesh,
         })
     }
     /// Draws one frame: clears the next swapchain image to `colour` (linear RGBA,
-    /// 0.0–1.0), draws the triangle on it, and shows it. The § 5 loop, in order:
+    /// 0.0–1.0), draws the mesh on it, and shows it. The § 5 loop, in order:
     /// wait fence → acquire → reset fence → record → submit → present.
     pub fn draw_frame(&mut self, colour: [f32; 4]) -> Result<FrameStatus, GpuError> {
         let slot = self.frames.current();
@@ -284,6 +311,7 @@ impl GpuContext {
                 slot.command_buffer,
                 &target,
                 self.pipeline.handle,
+                &self.mesh,
                 colour,
             )?;
 
@@ -388,6 +416,7 @@ impl Drop for GpuContext {
             // Nothing may be destroyed while the GPU might still be using it. If the
             // wait itself fails, the device is lost and there's nothing left to wait for.
             let _ = self.device.device_wait_idle();
+            self.mesh.destroy(&self.device);
             self.frames.destroy(&self.device);
             self.pipeline.destroy(&self.device);
             self.swapchain.destroy(&self.device, &self.swapchain_loader);

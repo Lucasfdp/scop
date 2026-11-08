@@ -5,6 +5,7 @@ use std::ffi::CStr;
 use ash::{Device, vk};
 
 use crate::gpu::GpuError;
+use crate::mesh::Vertex;
 use crate::spirv;
 
 const ENTRY_POINT: &CStr = c"main";
@@ -107,8 +108,12 @@ fn create_pipeline(
             .name(ENTRY_POINT),
     ];
 
-    // No vertex buffers yet: positions are in the shader (§ 7 changes this).
-    let vertex_input = vk::PipelineVertexInputStateCreateInfo::default();
+    // The packing list (§ 7): binding 0 holds `Vertex`es; locations 0 and 1 read from it.
+    let bindings = [Vertex::binding()];
+    let attributes = Vertex::attributes();
+    let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&bindings)
+        .vertex_attribute_descriptions(&attributes);
 
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST);

@@ -14,6 +14,7 @@ use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::gpu::{GpuContext, GpuError};
+use crate::mesh::MeshData;
 use crate::pipeline::Shaders;
 
 /// What the app asks for when opening a window.
@@ -55,12 +56,13 @@ impl From<GpuError> for PlatformError {
     }
 }
 
-/// Opens a window, sets up the GPU for it with the app's `shaders`, calls `on_ready`
-/// once both exist, then draws frames until the user quits. Each frame is cleared
+/// Opens a window, sets up the GPU for it with the app's `shaders` and `mesh`, calls
+/// `on_ready` once both exist, then draws the mesh every frame until the user quits. Each frame is cleared
 /// to `clear_colour(seconds since start)`.
 pub fn run(
     config: WindowConfig,
     shaders: Shaders,
+    mesh: MeshData,
     on_ready: fn(&GpuContext),
     clear_colour: fn(f32) -> [f32; 4],
 ) -> Result<(), PlatformError> {
@@ -68,6 +70,7 @@ pub fn run(
     let mut app = App {
         config,
         shaders,
+        mesh,
         on_ready,
         clear_colour,
         start: Instant::now(),
@@ -86,6 +89,7 @@ pub fn run(
 struct App {
     config: WindowConfig,
     shaders: Shaders,
+    mesh: MeshData,
     on_ready: fn(&GpuContext),
     clear_colour: fn(f32) -> [f32; 4],
     start: Instant,
@@ -146,8 +150,13 @@ impl ApplicationHandler for App {
         // `inner_size` is in physical pixels (2× the logical size on Retina).
         let size = window.inner_size();
         let app_name = CString::new(self.config.title.as_str()).unwrap_or_default();
-        let gpu = match GpuContext::new(&app_name, &window, (size.width, size.height), self.shaders)
-        {
+        let gpu = match GpuContext::new(
+            &app_name,
+            &window,
+            (size.width, size.height),
+            self.shaders,
+            &self.mesh,
+        ) {
             Ok(gpu) => gpu,
             Err(e) => return self.fail(event_loop, e.into()),
         };

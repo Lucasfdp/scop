@@ -678,3 +678,60 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 **Plain:** draw by walking the index buffer instead of the vertices in order.
 **Precise:** `cmd_draw_indexed(index_count, instance_count, first_index, vertex_offset, first_instance)`.
 **Introduced in:** § 7
+
+---
+
+## Section 8 — Splitting engine from app
+
+### public API
+**Plain:** everything a crate makes `pub` and reachable from outside — the agreed surface other code may use.
+**Introduced in:** § 8
+
+### crate boundary
+**Plain:** the line between two crates; Rust only lets one use what the other marks `pub`.
+**Introduced in:** § 8
+
+### coupling
+**Plain:** how much one piece of code depends on another's details. Loose coupling = internals can change without breaking users.
+**Introduced in:** § 8
+
+### inversion of control
+**Plain:** the framework owns the main loop and calls your code at the right moments — "don't call us, we'll call you".
+**Introduced in:** § 8
+
+### App trait
+**Plain:** the contract an app implements so the engine can call it: `setup`, `update`, `draw`.
+**Introduced in:** § 8
+
+### default method
+**Plain:** a trait method with a body; implementers may override it or keep it.
+**Introduced in:** § 8
+
+### generic function
+**Plain:** one function that works for any type meeting a requirement: `fn run<A: App>(app: A)`. Specialised at compile time, no runtime cost.
+**Introduced in:** § 8
+
+### newtype
+**Plain:** a struct wrapping one value to make a distinct type: `struct MeshId(usize)`.
+**Introduced in:** § 8
+
+### typed handle
+**Plain:** a newtype id the engine gives instead of the object; the engine keeps ownership.
+**Precise:** `MeshId`, `PipelineId` — indices into the engine's `Vec`s, with a private inner number.
+**Introduced in:** § 8
+
+### draw list
+**Plain:** the app's per-frame list of requests ("clear to X; draw mesh M with pipeline P"), recorded by the engine.
+**Introduced in:** § 8
+
+### input abstraction
+**Plain:** the engine's own `Key` type, translated from `winit`'s, so apps never depend on `winit`.
+**Introduced in:** § 8
+
+### delta time
+**Plain:** seconds since the previous frame; multiply movement by it so speed doesn't depend on frame rate.
+**Introduced in:** § 8
+
+### re-export
+**Plain:** `pub use path::Item;` — makes an item available at a shorter, public path.
+**Introduced in:** § 8

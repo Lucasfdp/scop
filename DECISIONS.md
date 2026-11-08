@@ -103,3 +103,13 @@ committing pre-built `.spv` files (easy to forget to rebuild).
 library linked into scop. Shader *loading* (bytes → validated SPIR-V words → shader
 module) is our own code, as the subject requires.
 **Cost accepted:** `glslc` must be installed (the Makefile installs it, § 16).
+
+## 2026-11-08 — Mesh uploads go through a staging buffer into device-local memory
+**Chose:** write vertices/indices into a `HOST_VISIBLE | HOST_COHERENT` staging buffer,
+copy with `cmd_copy_buffer` into a `DEVICE_LOCAL` buffer, wait, destroy the staging buffer.
+**Rejected:** drawing straight from host-visible memory.
+**Why:** fastest to read on every GPU (campus graphics cards keep host-visible memory on
+the CPU side); § 14 textures need the same staging path anyway. On the M2 (unified
+memory) the only cost is one extra copy at load time.
+**Cost accepted:** more code (one-off command buffer, fence wait) for each upload.
+**Revisit if:** per-frame data — that goes in host-visible memory (§ 10's uniforms).

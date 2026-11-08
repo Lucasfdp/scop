@@ -179,7 +179,7 @@ Destroy in reverse: `destroy_buffer`, then `free_memory`.
 The index buffer takes the same path with `INDEX_BUFFER` instead of `VERTEX_BUFFER`.
 This is load-time work, once per model — the wait doesn't touch the frame loop.
 
-### Decision: staging, or write straight into host-visible memory?
+### Decision (made 2026-11-08): staging → device-local for meshes
 
 | | Staging → device-local (recommended) | Host-visible only |
 |---|---|---|
@@ -188,8 +188,13 @@ This is load-time work, once per model — the wait doesn't touch the frame loop
 | Reuse | **§ 14 textures need exactly this path** (images can only be filled by a copy) | Textures would need it anyway |
 | When it fits | Data written once, read every frame (meshes) | Data rewritten every frame (§ 10's uniforms) |
 
-Recommendation: **staging for meshes**; host-visible for per-frame data later. Confirm
-or override at the gate.
+**Chosen: staging for meshes** (logged in `DECISIONS.md`); host-visible memory for data
+rewritten every frame (§ 10's uniforms). On your M2 the only cost is one extra copy at
+load time — drawing speed per frame is the same.
+
+*Deferred idea* (`00-PLAN.md` → Deferred / v2): when a GPU offers memory that is both
+`DEVICE_LOCAL` and `HOST_VISIBLE` (unified memory, or Resizable BAR on PC cards), an
+engine can skip staging and write directly. Worth it in ft_vox, not in scop.
 
 ### 4. Telling the pipeline
 

@@ -246,3 +246,36 @@ its position y, and its real red value. So the colour becomes (x, y, red). Negat
 coordinates give negative values, which end up as 0 in the image, so corners on the left
 or top lose red/green. No error anywhere — the GPU reads bytes exactly as the packing
 list says.
+
+## Section 8
+
+**A-8.1** The **engine owns the main loop** (via `winit`'s event loop) and **calls scop**:
+`setup` once when the GPU is ready, `update` with the input and delta time each frame,
+`draw` to collect the frame's draw list. scop never runs a loop or calls "render now";
+it only answers when called. That reversal — framework calls app, not app calls library —
+is inversion of control.
+
+**A-8.2** **Engine:** (b) the swapchain, (d) the SPIR-V loader, (f) translating `winit`
+key codes — every project needs them unchanged. **scop:** (a) the `.obj` path, (c) the
+backdrop colour, (e) the GLSL of scop's shaders, (g) which key toggles the texture —
+choices this project makes. (The `.obj` *parser* is engine — ft_newton loads models too —
+but *which file* is scop's choice.)
+
+**A-8.3** scop dropping the `Mesh` would run its `Drop`/destroy and free the buffers
+while up to two frames on the GPU may still be reading them — **use-after-free on the
+GPU**: validation reports buffers destroyed while in use; without it, garbage or a crash.
+With a handle, the **engine keeps ownership**: scop holds only a number, and the engine
+destroys meshes in its own `Drop`, after `device_wait_idle`. scop can't destroy what it
+doesn't own.
+
+**A-8.4** With `winit`'s `KeyCode` in the trait, **every app** that names a renamed key
+— scop, ft_newton, ft_vox — fails to compile and must be edited, even though none of them
+cares about `winit`. With the engine's own `Key`, only **one place** changes: the
+engine's translation from `winit` codes to `Key`. The apps don't notice. That's what
+loose coupling buys.
+
+**A-8.5** **`pub`:** `Vertex` (apps build mesh data from it), `MeshId` (apps receive and
+pass it back), `App` (apps implement it). **`pub(crate)` or private:** `Buffer` (GPU
+memory is engine business; apps get `MeshId`s instead), `find_memory_type` (an internal
+helper of `Buffer`), `GpuContext::draw_frame` (the engine calls it from its own loop; an
+app calling it directly would bypass the frame order).
