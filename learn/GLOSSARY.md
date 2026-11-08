@@ -581,6 +581,11 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 
 ## Section 7 — Sending data to the GPU
 
+### mesh
+**Plain:** a shape made of corners (vertices) and triangles (indices into the corners) — a net of triangles over the surface. Every model scop shows is one.
+**Precise:** `MeshData` (CPU: `Vec<Vertex>` + `Vec<u32>`) → `Mesh` (GPU: vertex buffer + index buffer + index count).
+**Introduced in:** § 7
+
 ### buffer
 **Plain:** a description of "N bytes the GPU may use for these purposes". Has no memory until you bind some.
 **Precise:** `VkBuffer`; destroy it before freeing its memory.
@@ -735,3 +740,101 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 ### re-export
 **Plain:** `pub use path::Item;` — makes an item available at a shorter, public path.
 **Introduced in:** § 8
+
+---
+
+## Section 9 — Just enough 3D maths
+
+### vector
+**Plain:** three numbers (x, y, z): a place or a step. Has a length and a direction.
+**Introduced in:** § 9
+
+### point vs direction
+**Plain:** the same three numbers can mean a place (moved by translations) or a step/arrow (not moved). Told apart by `w`.
+**Introduced in:** § 9
+
+### dot product
+**Plain:** `a·b = ax·bx + ay·by + az·bz`; for length-1 vectors, the cosine of the angle between them (1 same way, 0 perpendicular, −1 opposite).
+**Introduced in:** § 9
+
+### cross product
+**Plain:** `a × b`: a vector at right angles to both — e.g. which way a face points, from two of its edges.
+**Introduced in:** § 9
+
+### normalise
+**Plain:** scale a vector to length 1, keeping its direction. Guard against length 0.
+**Introduced in:** § 9
+
+### matrix
+**Plain:** a 4×4 grid of numbers that applies a transform; multiplying two combines them.
+**Precise:** `Mat4`, stored column-major.
+**Introduced in:** § 9
+
+### transform
+**Plain:** a change applied to every point — move, turn, resize, project.
+**Introduced in:** § 9
+
+### homogeneous coordinates
+**Plain:** writing 3D vectors with a 4th number `w`: 1 for points, 0 for directions. Lets one 4×4 matrix also translate, and only points.
+**Introduced in:** § 9
+
+### translation matrix
+**Plain:** moves points by (tx, ty, tz); the numbers sit in the 4th column.
+**Introduced in:** § 9
+
+### rotation matrix
+**Plain:** turns points around the x, y or z axis through the origin, by an angle in radians.
+**Introduced in:** § 9
+
+### scale matrix
+**Plain:** stretches or shrinks along each axis.
+**Introduced in:** § 9
+
+### composition
+**Plain:** combining transforms by multiplying matrices. With column vectors, `A × B` does B first — read right to left. Order changes the result.
+**Introduced in:** § 9
+
+### model matrix
+**Plain:** places one model in the world: centre it, turn it, move it.
+**Introduced in:** § 9
+
+### view matrix
+**Plain:** places the world in front of the camera (scop: push it away along −z).
+**Introduced in:** § 9
+
+### projection matrix
+**Plain:** prepares the scene for the screen with perspective; Vulkan's version also flips y and maps depth to 0..1.
+**Precise:** the full chain is `P × V × M`.
+**Introduced in:** § 9
+
+### perspective divide
+**Plain:** the GPU divides x, y, z by `w` after the vertex shader; with `w` = distance, far things shrink.
+**Introduced in:** § 9
+
+### field of view
+**Plain:** how wide the camera sees, as an angle. scop uses the vertical one.
+**Introduced in:** § 9
+
+### aspect ratio
+**Plain:** image width ÷ height; the projection uses it so nothing looks stretched.
+**Introduced in:** § 9
+
+### near and far planes
+**Plain:** the closest and farthest distances drawn; depth 0 at near, 1 at far.
+**Introduced in:** § 9
+
+### column-major
+**Plain:** storing a matrix's 16 numbers column by column — how GLSL reads `mat4`.
+**Introduced in:** § 9
+
+### radians
+**Plain:** angle unit: a full turn = 2π ≈ 6.28. `degrees × π / 180`.
+**Introduced in:** § 9
+
+### operator overloading
+**Plain:** implementing `std::ops` traits (`Add`, `Mul`…) so your types work with `+`, `*`.
+**Introduced in:** § 9
+
+### epsilon comparison
+**Plain:** treating two floats as equal if their difference is below a tiny threshold, because of rounding.
+**Introduced in:** § 9

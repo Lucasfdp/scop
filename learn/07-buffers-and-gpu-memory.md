@@ -4,7 +4,7 @@ slug: buffers-and-gpu-memory
 tier: T2
 status: in-progress
 prereqs: [6]
-terms: [buffer, buffer usage, device memory, memory requirements, memory type, memory heap, DEVICE_LOCAL, HOST_VISIBLE, HOST_COHERENT, map, bind (memory), staging buffer, cmd_copy_buffer, vertex buffer, index buffer, index type, stride, vertex binding, vertex attribute, attribute format, offset_of!, draw_indexed]
+terms: [mesh, buffer, buffer usage, device memory, memory requirements, memory type, memory heap, DEVICE_LOCAL, HOST_VISIBLE, HOST_COHERENT, map, bind (memory), staging buffer, cmd_copy_buffer, vertex buffer, index buffer, index type, stride, vertex binding, vertex attribute, attribute format, offset_of!, draw_indexed]
 ---
 
 # Section 7 — Sending data to the GPU
@@ -53,6 +53,12 @@ you get a garbage shape, not an error.
 ---
 
 ## The names for it
+
+**mesh** — a shape described as **corners plus triangles**: a list of vertices and a
+list of indices saying which three corners make each triangle. The word means *net*: the
+triangles form a net stretched over the shape's surface. Every 3D model in scop — the 42
+logo, the teapot — is a mesh. In the engine, `MeshData` is the mesh on the CPU (two
+`Vec`s), `Mesh` is the same mesh in GPU memory (two buffers).
 
 **buffer** — `VkBuffer`: a handle describing "a run of N bytes the GPU may use for these
 purposes". On its own it has **no memory**: it's a label waiting for a place.

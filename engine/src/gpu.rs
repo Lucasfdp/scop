@@ -2,8 +2,8 @@
 //! logical device and swapchain.
 //!
 //! Creation order: loader → instance → debug messenger → surface → physical device
-//! (chosen) → logical device → queue (fetched) → swapchain → image views → pipeline
-//! → frame slots → mesh buffers.
+//! (chosen) → logical device → queue (fetched) → swapchain → image views → frame slots.
+//! Pipelines and meshes are added later, by the app, through `Gfx` (§ 8).
 //! `Drop` waits for the GPU to go idle, then destroys in the mirror order.
 
 use std::ffi::{CStr, c_char, c_void};
@@ -12,6 +12,7 @@ use std::fmt;
 use ash::{Device, Entry, Instance, ext, khr, vk};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 
+use crate::app::{Frame, GpuInfo, MeshId, PipelineId};
 use crate::buffer::Uploader;
 use crate::frames::{self, FrameTarget, Frames};
 use crate::mesh::{Mesh, MeshData};
@@ -23,7 +24,7 @@ const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
 /// Everything that can go wrong while setting up the GPU.
 #[derive(Debug)]
-pub enum GpuError {
+pub(crate) enum GpuError {
     /// The Vulkan loader library (`libvulkan`) could not be opened.
     Load(ash::LoadingError),
     /// A Vulkan call returned an error code.
@@ -36,6 +37,8 @@ pub enum GpuError {
     Unsupported(&'static str),
     /// Shader bytes that aren't valid SPIR-V.
     Spirv(SpirvError),
+    /// A draw request named a pipeline or mesh this context never created.
+    UnknownHandle,
 }
 
 impl fmt::Display for GpuError {
@@ -49,6 +52,7 @@ impl fmt::Display for GpuError {
             GpuError::WindowHandle(e) => write!(f, "could not get the window's handles: {e}"),
             GpuError::Unsupported(what) => write!(f, "unsupported: {what}"),
             GpuError::Spirv(e) => write!(f, "bad shader: {e}"),
+            GpuError::UnknownHandle => write!(f, "draw request with an unknown pipeline or mesh"),
         }
     }
 }
@@ -83,7 +87,7 @@ impl From<vk::Result> for GpuError {
 ///
 /// Deliberately not `Clone` or `Copy`: one owner, so one destroy.
 /// **Must be dropped before the window it was created from** (the surface points at it).
-pub struct GpuContext {
+pub(crate) struct GpuContext {
     _entry: Entry, // keeps the loader library open for as long as the instance lives
     instance: Instance,
     debug: Option<DebugMessenger>,
@@ -96,14 +100,16 @@ pub struct GpuContext {
     swapchain_loader: khr::swapchain::Device,
     swapchain: Swapchain,
     rendering_loader: khr::dynamic_rendering::Device,
-    pipeline: Pipeline,
+    memory_types: vk::PhysicalDeviceMemoryProperties,
     frames: Frames,
-    mesh: Mesh,
+    // Owned here, handed out to the app as `PipelineId(i)` / `MeshId(i)` (§ 8).
+    pipelines: Vec<Pipeline>,
+    meshes: Vec<Mesh>,
 }
 
 /// What happened when a frame was drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameStatus {
+pub(crate) enum FrameStatus {
     /// Drawn and shown.
     Presented,
     /// Drawn and shown, but the swapchain no longer matches the window exactly.
@@ -115,16 +121,12 @@ pub enum FrameStatus {
 impl GpuContext {
     /// Sets up Vulkan for drawing into `window`.
     ///
-    /// `size` is the window's size in **physical** pixels (not logical points);
-    /// `shaders` are the app's compiled SPIR-V, used to build the pipeline;
-    /// `mesh` is uploaded to GPU memory once, here.
+    /// `size` is the window's size in **physical** pixels (not logical points).
     /// The caller must drop the returned context before dropping the window.
-    pub fn new(
+    pub(crate) fn new(
         app_name: &CStr,
         window: &(impl HasDisplayHandle + HasWindowHandle),
         size: (u32, u32),
-        shaders: Shaders,
-        mesh: &MeshData,
     ) -> Result<Self, GpuError> {
         let display_handle = window.display_handle()?.as_raw();
         let window_handle = window.window_handle()?.as_raw();
@@ -211,19 +213,9 @@ impl GpuContext {
         // On Vulkan 1.2 the dynamic rendering functions come from the extension's
         // own function table, not from `Device`.
         let rendering_loader = khr::dynamic_rendering::Device::new(&instance, &device);
-        let pipeline = Pipeline::new(&device, swapchain.format.format, shaders).map_err(|e| {
-            // SAFETY: Pipeline cleaned up after itself; nothing has been submitted yet.
-            unsafe {
-                swapchain.destroy(&device, &swapchain_loader);
-                device.destroy_device(None);
-            }
-            fail(e)
-        })?;
-
         let frames = Frames::new(&device, queue_family_index).map_err(|e| {
             // SAFETY: Frames cleaned up after itself; nothing has been submitted yet.
             unsafe {
-                pipeline.destroy(&device);
                 swapchain.destroy(&device, &swapchain_loader);
                 device.destroy_device(None);
             }
@@ -234,22 +226,6 @@ impl GpuContext {
         // SAFETY: plain query on a live instance.
         let memory_types =
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
-        let uploader = Uploader {
-            device: &device,
-            memory_types: &memory_types,
-            pool: frames.pool(),
-            queue,
-        };
-        let mesh = Mesh::upload(&uploader, mesh).map_err(|e| {
-            // SAFETY: uploads wait for themselves; nothing is in use.
-            unsafe {
-                frames.destroy(&device);
-                pipeline.destroy(&device);
-                swapchain.destroy(&device, &swapchain_loader);
-                device.destroy_device(None);
-            }
-            fail(e)
-        })?;
 
         Ok(GpuContext {
             _entry: entry,
@@ -264,15 +240,47 @@ impl GpuContext {
             swapchain_loader,
             swapchain,
             rendering_loader,
-            pipeline,
+            memory_types,
             frames,
-            mesh,
+            pipelines: Vec::new(),
+            meshes: Vec::new(),
         })
     }
-    /// Draws one frame: clears the next swapchain image to `colour` (linear RGBA,
-    /// 0.0–1.0), draws the mesh on it, and shows it. The § 5 loop, in order:
+
+    /// Builds a pipeline for the swapchain's format and returns its ticket.
+    pub(crate) fn create_pipeline(&mut self, shaders: Shaders) -> Result<PipelineId, GpuError> {
+        let pipeline = Pipeline::new(&self.device, self.swapchain.format.format, shaders)?;
+        self.pipelines.push(pipeline);
+        Ok(PipelineId(self.pipelines.len() - 1))
+    }
+
+    /// Uploads a mesh to device-local memory and returns its ticket.
+    pub(crate) fn create_mesh(&mut self, data: &MeshData) -> Result<MeshId, GpuError> {
+        let uploader = Uploader {
+            device: &self.device,
+            memory_types: &self.memory_types,
+            pool: self.frames.pool(),
+            queue: self.queue,
+        };
+        let mesh = Mesh::upload(&uploader, data)?;
+        self.meshes.push(mesh);
+        Ok(MeshId(self.meshes.len() - 1))
+    }
+
+    /// Draws one frame from the app's draw list: clears the next swapchain image,
+    /// draws each requested mesh, and shows it. The § 5 loop, in order:
     /// wait fence → acquire → reset fence → record → submit → present.
-    pub fn draw_frame(&mut self, colour: [f32; 4]) -> Result<FrameStatus, GpuError> {
+    pub(crate) fn draw_frame(&mut self, frame: &Frame) -> Result<FrameStatus, GpuError> {
+        // Turn tickets into the real objects before touching the GPU, so a bad
+        // ticket fails cleanly instead of half-way through a frame.
+        let mut draws = Vec::with_capacity(frame.draws.len());
+        for &(pipeline, mesh) in &frame.draws {
+            match (self.pipelines.get(pipeline.0), self.meshes.get(mesh.0)) {
+                (Some(p), Some(m)) => draws.push((p.handle, m)),
+                _ => return Err(GpuError::UnknownHandle),
+            }
+        }
+
         let slot = self.frames.current();
 
         // SAFETY: every handle below belongs to this context and is alive; the fence
@@ -310,9 +318,8 @@ impl GpuContext {
                 &self.rendering_loader,
                 slot.command_buffer,
                 &target,
-                self.pipeline.handle,
-                &self.mesh,
-                colour,
+                &draws,
+                frame.clear_colour,
             )?;
 
             // 5. Hand it over: wait for `image_free` before the first write to the
@@ -350,53 +357,26 @@ impl GpuContext {
             }
         }
     }
-    /// Format of the swapchain images (e.g. `B8G8R8A8_SRGB`).
-    pub fn swapchain_format(&self) -> vk::Format {
-        self.swapchain.format.format
-    }
-
-    /// How finished images are handed to the screen (e.g. `FIFO`).
-    pub fn present_mode(&self) -> vk::PresentModeKHR {
-        self.swapchain.present_mode
-    }
-
-    /// Size of the swapchain images in physical pixels.
-    pub fn extent(&self) -> (u32, u32) {
-        (self.swapchain.extent.width, self.swapchain.extent.height)
-    }
-
-    /// How many images the swapchain actually created (may be more than asked for).
-    pub fn image_count(&self) -> usize {
-        self.swapchain.images.len()
-    }
-
-    /// The GPU's name as the driver reports it (e.g. "Apple M2").
-    pub fn gpu_name(&self) -> String {
+    /// Facts about the GPU and swapchain, as plain values for the app to print.
+    pub(crate) fn info(&self) -> GpuInfo {
         let props = self.properties();
-        props
-            .device_name_as_c_str()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| String::from("<unnamed GPU>"))
-    }
-
-    /// The Vulkan version the GPU supports, as (major, minor, patch).
-    pub fn api_version(&self) -> (u32, u32, u32) {
-        let v = self.properties().api_version;
-        (
-            vk::api_version_major(v),
-            vk::api_version_minor(v),
-            vk::api_version_patch(v),
-        )
-    }
-
-    /// Index of the queue family the queue came from.
-    pub fn queue_family_index(&self) -> u32 {
-        self.queue_family_index
-    }
-
-    /// The queue that command buffers will be submitted to (§ 5).
-    pub fn queue(&self) -> vk::Queue {
-        self.queue
+        let v = props.api_version;
+        GpuInfo {
+            name: props
+                .device_name_as_c_str()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| String::from("<unnamed GPU>")),
+            vulkan_version: (
+                vk::api_version_major(v),
+                vk::api_version_minor(v),
+                vk::api_version_patch(v),
+            ),
+            queue_family: self.queue_family_index,
+            swapchain_format: format!("{:?}", self.swapchain.format.format),
+            present_mode: format!("{:?}", self.swapchain.present_mode),
+            extent: (self.swapchain.extent.width, self.swapchain.extent.height),
+            image_count: self.swapchain.images.len(),
+        }
     }
 
     fn properties(&self) -> vk::PhysicalDeviceProperties {
@@ -416,9 +396,13 @@ impl Drop for GpuContext {
             // Nothing may be destroyed while the GPU might still be using it. If the
             // wait itself fails, the device is lost and there's nothing left to wait for.
             let _ = self.device.device_wait_idle();
-            self.mesh.destroy(&self.device);
+            for mesh in &self.meshes {
+                mesh.destroy(&self.device);
+            }
+            for pipeline in &self.pipelines {
+                pipeline.destroy(&self.device);
+            }
             self.frames.destroy(&self.device);
-            self.pipeline.destroy(&self.device);
             self.swapchain.destroy(&self.device, &self.swapchain_loader);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);

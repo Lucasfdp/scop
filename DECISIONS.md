@@ -113,3 +113,14 @@ the CPU side); § 14 textures need the same staging path anyway. On the M2 (unif
 memory) the only cost is one extra copy at load time.
 **Cost accepted:** more code (one-off command buffer, fence wait) for each upload.
 **Revisit if:** per-frame data — that goes in host-visible memory (§ 10's uniforms).
+
+## 2026-11-08 — Apps plug into the engine through an `App` trait
+**Chose:** `engine::run(config, app)` with `trait App { setup, update, draw }`; the engine
+owns the loop and calls the app (inversion of control). GPU objects stay in the engine,
+apps hold `MeshId` / `PipelineId` handles; input reaches apps as the engine's own `Key`.
+**Rejected:** a struct of callbacks (state awkward to share; every new callback breaks
+every app); the app owning the loop (fights `winit` 0.30's callback model).
+**Why:** app state lives naturally in `self`; new engine features arrive as default
+methods without breaking existing apps; apps never depend on `ash` or `winit`.
+**Cost accepted:** a fixed call order (setup → update → draw) that apps must fit into.
+**Revisit if:** a project needs several windows or its own loop timing (ft_vox?).

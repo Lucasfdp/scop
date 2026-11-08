@@ -1,5 +1,5 @@
-//! Window and event handling (the only module that talks to `winit`).
-//! Also decides *when* the GPU is set up: right after the window exists.
+//! Window and event handling (the only module that talks to `winit`), and the
+//! engine's main loop: it owns the loop and calls the app (§ 8).
 
 use std::ffi::CString;
 use std::fmt;
@@ -10,92 +10,92 @@ use winit::dpi::LogicalSize;
 use winit::error::{EventLoopError, OsError};
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
+use crate::app::{App, Flow, Frame, Gfx};
 use crate::gpu::{GpuContext, GpuError};
-use crate::mesh::MeshData;
-use crate::pipeline::Shaders;
+use crate::input::{Input, Key};
 
 /// What the app asks for when opening a window.
 pub struct WindowConfig {
     pub title: String,
+    /// Size in logical points (the physical size is 2× on a Retina screen).
     pub width: u32,
     pub height: u32,
 }
 
-/// Everything that can go wrong while opening or running the window.
+/// Why `run` stopped with an error. Opaque on purpose: apps print it, they don't
+/// need (or get) the `winit` and Vulkan types inside.
 #[derive(Debug)]
-pub enum PlatformError {
+pub struct RunError(ErrorKind);
+
+#[derive(Debug)]
+enum ErrorKind {
     EventLoop(EventLoopError),
     Window(OsError),
     Gpu(GpuError),
 }
 
-impl fmt::Display for PlatformError {
+impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PlatformError::EventLoop(e) => write!(f, "event loop error: {e}"),
-            PlatformError::Window(e) => write!(f, "could not create window: {e}"),
-            PlatformError::Gpu(e) => write!(f, "GPU setup failed: {e}"),
+        match &self.0 {
+            ErrorKind::EventLoop(e) => write!(f, "event loop error: {e}"),
+            ErrorKind::Window(e) => write!(f, "could not create window: {e}"),
+            ErrorKind::Gpu(e) => write!(f, "GPU error: {e}"),
         }
     }
 }
 
-impl std::error::Error for PlatformError {}
+impl std::error::Error for RunError {}
 
-impl From<EventLoopError> for PlatformError {
+impl From<EventLoopError> for RunError {
     fn from(e: EventLoopError) -> Self {
-        PlatformError::EventLoop(e)
+        RunError(ErrorKind::EventLoop(e))
     }
 }
 
-impl From<GpuError> for PlatformError {
+impl From<OsError> for RunError {
+    fn from(e: OsError) -> Self {
+        RunError(ErrorKind::Window(e))
+    }
+}
+
+impl From<GpuError> for RunError {
     fn from(e: GpuError) -> Self {
-        PlatformError::Gpu(e)
+        RunError(ErrorKind::Gpu(e))
     }
 }
 
-/// Opens a window, sets up the GPU for it with the app's `shaders` and `mesh`, calls
-/// `on_ready` once both exist, then draws the mesh every frame until the user quits. Each frame is cleared
-/// to `clear_colour(seconds since start)`.
-pub fn run(
-    config: WindowConfig,
-    shaders: Shaders,
-    mesh: MeshData,
-    on_ready: fn(&GpuContext),
-    clear_colour: fn(f32) -> [f32; 4],
-) -> Result<(), PlatformError> {
+/// Opens a window, sets up the GPU, then runs `app` until it returns `Flow::Exit`
+/// or the window is closed: `setup` once, then `update` and `draw` every frame.
+pub fn run<A: App>(config: WindowConfig, app: A) -> Result<(), RunError> {
     let event_loop = EventLoop::new()?;
-    let mut app = App {
+    let mut runner = Runner {
         config,
-        shaders,
-        mesh,
-        on_ready,
-        clear_colour,
-        start: Instant::now(),
+        app,
+        input: Input::default(),
+        last_frame: Instant::now(),
         minimised: false,
         graphics: None,
         error: None,
     };
-    event_loop.run_app(&mut app)?;
-    match app.error {
+    event_loop.run_app(&mut runner)?;
+    match runner.error {
         Some(e) => Err(e),
         None => Ok(()),
     }
 }
 
-/// State the event loop calls back into.
-struct App {
+/// The engine's side of the loop: `winit` calls this, and this calls the app.
+struct Runner<A: App> {
     config: WindowConfig,
-    shaders: Shaders,
-    mesh: MeshData,
-    on_ready: fn(&GpuContext),
-    clear_colour: fn(f32) -> [f32; 4],
-    start: Instant,
+    app: A,
+    input: Input,
+    last_frame: Instant,
     minimised: bool,
     graphics: Option<Graphics>,
-    error: Option<PlatformError>,
+    error: Option<RunError>,
 }
 
 /// The window and the GPU context made from it, kept together so the order they
@@ -107,24 +107,37 @@ struct Graphics {
     window: Window,
 }
 
-impl App {
+impl<A: App> Runner<A> {
     /// Records the error and stops the event loop; `run` returns it.
-    fn fail(&mut self, event_loop: &ActiveEventLoop, error: PlatformError) {
+    fn fail(&mut self, event_loop: &ActiveEventLoop, error: RunError) {
         self.error = Some(error);
         event_loop.exit();
     }
 
-    /// Draws one frame, then asks for the next one. While minimised it does neither,
-    /// so the loop pauses until a resize restarts it.
-    fn draw(&mut self, event_loop: &ActiveEventLoop) {
+    /// One frame: let the app update, collect its draw list, draw it, ask for the
+    /// next frame. While minimised it does nothing, so the loop pauses.
+    fn frame(&mut self, event_loop: &ActiveEventLoop) {
         if self.minimised {
             return;
         }
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+
+        let flow = self.app.update(&self.input, dt);
+        self.input.end_frame();
+        if flow == Flow::Exit {
+            event_loop.exit();
+            return;
+        }
+
+        let mut frame = Frame::new();
+        self.app.draw(&mut frame);
+
         let Some(graphics) = &mut self.graphics else {
             return;
         };
-        let colour = (self.clear_colour)(self.start.elapsed().as_secs_f32());
-        match graphics.gpu.draw_frame(colour) {
+        match graphics.gpu.draw_frame(&frame) {
             // OutOfDate/Suboptimal: the swapchain no longer matches the window.
             // Rebuilding it is § 16; until then frames may be skipped after a resize.
             Ok(_status) => graphics.window.request_redraw(),
@@ -133,7 +146,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl<A: App> ApplicationHandler for Runner<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.graphics.is_some() {
             return;
@@ -143,24 +156,24 @@ impl ApplicationHandler for App {
             .with_inner_size(LogicalSize::new(self.config.width, self.config.height));
         let window = match event_loop.create_window(attributes) {
             Ok(window) => window,
-            Err(e) => return self.fail(event_loop, PlatformError::Window(e)),
+            Err(e) => return self.fail(event_loop, e.into()),
         };
 
         // Vulkan setup needs the window, so it happens here, not before the loop.
         // `inner_size` is in physical pixels (2× the logical size on Retina).
         let size = window.inner_size();
         let app_name = CString::new(self.config.title.as_str()).unwrap_or_default();
-        let gpu = match GpuContext::new(
-            &app_name,
-            &window,
-            (size.width, size.height),
-            self.shaders,
-            &self.mesh,
-        ) {
+        let mut gpu = match GpuContext::new(&app_name, &window, (size.width, size.height)) {
             Ok(gpu) => gpu,
             Err(e) => return self.fail(event_loop, e.into()),
         };
-        (self.on_ready)(&gpu);
+
+        // The app's turn: create its pipelines and meshes.
+        if let Err(e) = self.app.setup(&mut Gfx { gpu: &mut gpu }) {
+            return self.fail(event_loop, e);
+        }
+
+        self.last_frame = Instant::now();
         window.request_redraw(); // start the frame loop
         self.graphics = Some(Graphics { gpu, window });
     }
@@ -168,36 +181,31 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::RedrawRequested => self.draw(event_loop),
-            WindowEvent::Resized(size) if size.width == 0 || size.height == 0 => {
-                // Minimised (on Linux/Windows): a 0×0 swapchain is invalid, so stop
-                // drawing until the window has a real size again.
-                self.minimised = true;
-                println!("minimised: rendering paused");
-            }
+            WindowEvent::RedrawRequested => self.frame(event_loop),
             WindowEvent::Resized(size) => {
-                println!("resized: {}x{}", size.width, size.height);
-                if self.minimised {
-                    self.minimised = false;
-                    if let Some(graphics) = &self.graphics {
-                        graphics.window.request_redraw(); // restart the frame loop
-                    }
+                // Minimised (on Linux/Windows) = 0×0, and a 0×0 swapchain is invalid:
+                // stop drawing until the window has a real size again.
+                let was_minimised = self.minimised;
+                self.minimised = size.width == 0 || size.height == 0;
+                let restored = was_minimised && !self.minimised;
+                if let Some(graphics) = self.graphics.as_ref().filter(|_| restored) {
+                    graphics.window.request_redraw(); // restart the frame loop
                 }
             }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        logical_key,
-                        state: ElementState::Pressed,
-                        repeat: false,
+                        physical_key: PhysicalKey::Code(code),
+                        state,
                         ..
                     },
                 ..
             } => {
-                if logical_key == Key::Named(NamedKey::Escape) {
-                    event_loop.exit();
-                } else {
-                    println!("key: {logical_key:?}");
+                if let Some(key) = Key::from_winit(code) {
+                    match state {
+                        ElementState::Pressed => self.input.key_down(key),
+                        ElementState::Released => self.input.key_up(key),
+                    }
                 }
             }
             _ => {}

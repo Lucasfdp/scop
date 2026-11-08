@@ -120,15 +120,14 @@ pub(crate) struct FrameTarget {
     pub(crate) extent: vk::Extent2D,
 }
 
-/// Records one frame: make the image drawable, clear it to `colour` and draw `mesh`
-/// with dynamic rendering, then make it presentable.
+/// Records one frame: make the image drawable, clear it to `colour`, draw each
+/// (pipeline, mesh) pair in order with dynamic rendering, then make it presentable.
 pub(crate) fn record_frame(
     device: &Device,
     rendering: &khr::dynamic_rendering::Device,
     command_buffer: vk::CommandBuffer,
     target: &FrameTarget,
-    pipeline: vk::Pipeline,
-    mesh: &Mesh,
+    draws: &[(vk::Pipeline, &Mesh)],
     colour: [f32; 4],
 ) -> Result<(), GpuError> {
     let to_drawable = vk::ImageMemoryBarrier::default()
@@ -194,19 +193,22 @@ pub(crate) fn record_frame(
             &[to_drawable],
         );
         rendering.cmd_begin_rendering(command_buffer, &rendering_info);
-        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
+        // Dynamic state, set once: it stays set across the pipeline binds below.
         device.cmd_set_viewport(command_buffer, 0, &[viewport]);
         device.cmd_set_scissor(command_buffer, 0, &[whole_image]);
-        // Corners from binding 0, triangles from the index buffer (32-bit indices).
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices.handle], &[0]);
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            mesh.indices.handle,
-            0,
-            vk::IndexType::UINT32,
-        );
-        // All indices, 1 instance, from index 0, no vertex offset, instance 0.
-        device.cmd_draw_indexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
+        for &(pipeline, mesh) in draws {
+            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
+            // Corners from binding 0, triangles from the index buffer (32-bit indices).
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices.handle], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                mesh.indices.handle,
+                0,
+                vk::IndexType::UINT32,
+            );
+            // All indices, 1 instance, from index 0, no vertex offset, instance 0.
+            device.cmd_draw_indexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
+        }
         rendering.cmd_end_rendering(command_buffer);
         // The drawing must finish before the frame counts as done.
         device.cmd_pipeline_barrier(

@@ -1,16 +1,52 @@
+//! scop — a `.obj` viewer built on the `engine` crate. scop only says *what* to
+//! show and how keys behave; the engine does everything GPU- and window-related.
+
 use std::env;
 use std::process::ExitCode;
+use std::time::Instant;
 
-use engine::gpu::GpuContext;
-use engine::mesh::{MeshData, Vertex};
-use engine::pipeline::Shaders;
-use engine::platform::{self, WindowConfig};
+use engine::{
+    App, Flow, Frame, Gfx, GpuInfo, Input, Key, MeshData, MeshId, PipelineId, RunError, Shaders,
+    Vertex, WindowConfig,
+};
 
 /// The mesh shaders, compiled by `build.rs` and embedded in the binary.
 const MESH_SHADERS: Shaders = Shaders {
     vertex: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.vert.spv")),
     fragment: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.frag.spv")),
 };
+
+/// scop's state. The ids are `None` until the engine calls `setup`.
+struct Scop {
+    start: Instant,
+    pipeline: Option<PipelineId>,
+    quad: Option<MeshId>,
+}
+
+impl App for Scop {
+    fn setup(&mut self, gfx: &mut Gfx<'_>) -> Result<(), RunError> {
+        print_gpu_info(&gfx.info());
+        self.pipeline = Some(gfx.create_pipeline(MESH_SHADERS)?);
+        self.quad = Some(gfx.create_mesh(&quad())?);
+        Ok(())
+    }
+
+    fn update(&mut self, input: &Input, _dt: f32) -> Flow {
+        // Quitting is scop's decision now, not the engine's.
+        if input.pressed(Key::Escape) {
+            Flow::Exit
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        frame.clear(pulsing_blue(self.start.elapsed().as_secs_f32()));
+        if let (Some(pipeline), Some(quad)) = (self.pipeline, self.quad) {
+            frame.draw(pipeline, quad);
+        }
+    }
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -34,7 +70,12 @@ fn main() -> ExitCode {
         width: 1280,
         height: 720,
     };
-    match platform::run(config, MESH_SHADERS, quad(), print_gpu_info, pulsing_blue) {
+    let scop = Scop {
+        start: Instant::now(),
+        pipeline: None,
+        quad: None,
+    };
+    match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("scop: {err}");
@@ -43,25 +84,22 @@ fn main() -> ExitCode {
     }
 }
 
-/// Called once the window and the GPU are both set up (§ 3 and § 4 checkpoints).
-fn print_gpu_info(gpu: &GpuContext) {
-    let (major, minor, patch) = gpu.api_version();
-    let (width, height) = gpu.extent();
+/// Printed once the window and the GPU are set up (§ 3 and § 4 checkpoints).
+fn print_gpu_info(info: &GpuInfo) {
+    let (major, minor, patch) = info.vulkan_version;
+    let (width, height) = info.extent;
     println!(
         "GPU: {} (Vulkan {major}.{minor}.{patch}), queue family {}",
-        gpu.gpu_name(),
-        gpu.queue_family_index()
+        info.name, info.queue_family
     );
     println!(
-        "swapchain: {:?}, {:?}, {width}x{height}, {} images",
-        gpu.swapchain_format(),
-        gpu.present_mode(),
-        gpu.image_count()
+        "swapchain: {}, {}, {width}x{height}, {} images",
+        info.swapchain_format, info.present_mode, info.image_count
     );
 }
 
-/// The § 5 checkpoint colour: a blue that pulses slowly (one cycle every ~6 s),
-/// so you can see a new frame is drawn every time. Linear RGBA, 0.0–1.0.
+/// The § 5 checkpoint colour: a blue that pulses slowly (one cycle every ~6 s).
+/// Linear RGBA, 0.0–1.0.
 fn pulsing_blue(seconds: f32) -> [f32; 4] {
     let wave = 0.5 + 0.5 * seconds.sin(); // 0.0 → 1.0 → 0.0 …
     [0.05, 0.1 + 0.2 * wave, 0.3 + 0.6 * wave, 1.0]

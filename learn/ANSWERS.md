@@ -279,3 +279,36 @@ pass it back), `App` (apps implement it). **`pub(crate)` or private:** `Buffer` 
 memory is engine business; apps get `MeshId`s instead), `find_memory_type` (an internal
 helper of `Buffer`), `GpuContext::draw_frame` (the engine calls it from its own loop; an
 app calling it directly would bypass the frame order).
+
+## Section 9
+
+**A-9.1** A 3×3 matrix can rotate and scale but **can't move** (translate) anything —
+it has nowhere to put "add 3 to x". Adding a 4th row and column gives that room, and a
+4th number `w` on every vector. **Points get `w = 1`, directions get `w = 0`.** The
+translation part of the matrix is multiplied by `w`, so points move and directions
+don't — "up" stays "up" wherever the model is placed. (The same `w` later carries the
+distance for the perspective divide.)
+
+**A-9.2** Read right to left: first translate to (3, 0, 0), *then* rotate around the
+origin — so the model **swings in a circle around the origin**, 3 units out, like a
+door on a hinge, instead of spinning. You probably wanted it to spin in place at
+(3, 0, 0): `translation(3, 0, 0) × rotation_y(angle)` — turn first (at the origin), then
+move.
+
+**A-9.3** `model = rotation_y(angle) × translation(−2, −1, 0)` — right to left: first
+move the centre (2, 1, 0) onto the origin, then rotate around the origin. (To spin it in
+place back at (2, 1, 0) instead: `translation(2, 1, 0) × rotation_y(angle) ×
+translation(−2, −1, 0)`.) This is exactly the subject's "rotate around its centre".
+
+**A-9.4** About **half the size** (in width and in height — a quarter of the area). The
+projection matrix puts each point's distance into `w` (2 and 4), and the GPU's
+**perspective divide** divides x and y by `w` after the vertex shader. Twice as far →
+divided by twice as much → half as big.
+
+**A-9.5** GLSL sees the matrix **transposed**: rows and columns swapped. The translation
+(tx, ty, tz), which belongs in the 4th column, lands in the **4th row** — the row that
+computes `w`. So instead of moving the model, it changes each point's `w` depending on
+its position, and the perspective divide then scales points unevenly: the model is
+distorted, flips, shoots off screen, or vanishes. Rotations come out turning the
+opposite way. No error is reported anywhere — which is why the storage order is fixed
+once and tested.
