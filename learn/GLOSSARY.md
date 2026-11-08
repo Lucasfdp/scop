@@ -576,3 +576,105 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 ### interpolation
 **Plain:** blending per-corner values across a triangle for each pixel, weighted by distance to each corner. Done by the rasteriser.
 **Introduced in:** § 6
+
+---
+
+## Section 7 — Sending data to the GPU
+
+### buffer
+**Plain:** a description of "N bytes the GPU may use for these purposes". Has no memory until you bind some.
+**Precise:** `VkBuffer`; destroy it before freeing its memory.
+**Introduced in:** § 7
+
+### buffer usage
+**Plain:** what a buffer may be used for, declared when it's created.
+**Precise:** `VERTEX_BUFFER`, `INDEX_BUFFER`, `TRANSFER_SRC`, `TRANSFER_DST`, `UNIFORM_BUFFER`, …
+**Introduced in:** § 7
+
+### device memory
+**Plain:** an actual block of memory you allocate, then attach buffers (or images) to.
+**Precise:** `VkDeviceMemory`, from `allocate_memory`; released with `free_memory`.
+**Introduced in:** § 7
+
+### memory requirements
+**Plain:** what a buffer tells you it needs: size, alignment, and which memory types it can live in.
+**Precise:** `memory_type_bits`: bit *i* set = memory type *i* allowed. Allocate `size`, not your data size.
+**Introduced in:** § 7
+
+### memory type
+**Plain:** one kind of GPU memory, described by property flags; you choose one by index.
+**Introduced in:** § 7
+
+### memory heap
+**Plain:** a physical pool of memory (e.g. the graphics card's VRAM); memory types are ways of using a heap.
+**Introduced in:** § 7
+
+### DEVICE_LOCAL
+**Plain:** memory that's fast for the GPU — the warehouse.
+**Introduced in:** § 7
+
+### HOST_VISIBLE
+**Plain:** memory the CPU ("host") can map and write — the loading dock.
+**Introduced in:** § 7
+
+### HOST_COHERENT
+**Plain:** CPU writes to mapped memory become visible to the GPU automatically, with no manual flush.
+**Introduced in:** § 7
+
+### map
+**Plain:** get a CPU pointer into host-visible memory, write through it, then unmap.
+**Precise:** `map_memory` / `unmap_memory`.
+**Introduced in:** § 7
+
+### bind (memory)
+**Plain:** attach a buffer to (part of) a memory allocation. Once per buffer, permanent.
+**Precise:** `bind_buffer_memory(buffer, memory, offset)`.
+**Introduced in:** § 7
+
+### staging buffer
+**Plain:** a temporary CPU-writable buffer used only to carry data into a GPU-local buffer with a copy.
+**Introduced in:** § 7
+
+### cmd_copy_buffer
+**Plain:** recorded transfer command: copy bytes from one buffer to another.
+**Precise:** source needs `TRANSFER_SRC`, destination `TRANSFER_DST`.
+**Introduced in:** § 7
+
+### vertex buffer
+**Plain:** a buffer holding the corners' data (position, colour, …).
+**Introduced in:** § 7
+
+### index buffer
+**Plain:** a buffer of corner numbers; every 3 make one triangle, so shared corners are stored once.
+**Introduced in:** § 7
+
+### index type
+**Plain:** the size of each index: `UINT16` (≤ 65 535 corners) or `UINT32`. scop uses `UINT32`.
+**Introduced in:** § 7
+
+### stride
+**Plain:** bytes from the start of one vertex to the start of the next.
+**Introduced in:** § 7
+
+### vertex binding
+**Plain:** "binding slot N reads a buffer whose vertices are `stride` bytes apart".
+**Precise:** `VertexInputBindingDescription`, input rate `VERTEX`.
+**Introduced in:** § 7
+
+### vertex attribute
+**Plain:** "shader `location` N is at byte `offset` in each vertex, in this format".
+**Precise:** `VertexInputAttributeDescription`.
+**Introduced in:** § 7
+
+### attribute format
+**Plain:** how many numbers and of what kind an attribute is. `R32G32_SFLOAT` = two 32-bit floats (`vec2`); R/G/B just mean 1st/2nd/3rd component here.
+**Introduced in:** § 7
+
+### offset_of!
+**Plain:** Rust macro: the byte offset of a field inside a struct.
+**Introduced in:** § 7
+
+### draw_indexed
+**Plain:** draw by walking the index buffer instead of the vertices in order.
+**Precise:** `cmd_draw_indexed(index_count, instance_count, first_index, vertex_offset, first_instance)`.
+**Introduced in:** § 7

@@ -2,7 +2,14 @@ use std::env;
 use std::process::ExitCode;
 
 use engine::gpu::GpuContext;
+use engine::pipeline::Shaders;
 use engine::platform::{self, WindowConfig};
+
+/// The § 6 triangle's shaders, compiled by `build.rs` and embedded in the binary.
+const TRIANGLE: Shaders = Shaders {
+    vertex: include_bytes!(concat!(env!("OUT_DIR"), "/triangle.vert.spv")),
+    fragment: include_bytes!(concat!(env!("OUT_DIR"), "/triangle.frag.spv")),
+};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -26,7 +33,7 @@ fn main() -> ExitCode {
         width: 1280,
         height: 720,
     };
-    match platform::run(config, print_gpu_info, pulsing_blue) {
+    match platform::run(config, TRIANGLE, print_gpu_info, pulsing_blue) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("scop: {err}");

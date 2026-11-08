@@ -4,7 +4,7 @@
 //! one fence (the desk light), one `image_free` semaphore. Slots are used in turn.
 //! Per-*image* objects (`render_done`) live with the swapchain instead.
 
-use ash::{Device, vk};
+use ash::{Device, khr, vk};
 
 use crate::gpu::GpuError;
 use crate::swapchain::COLOUR_RANGE;
@@ -107,61 +107,96 @@ fn create_slot(device: &Device, pool: vk::CommandPool) -> Result<Slot, GpuError>
     }
 }
 
-/// Records one frame: make `image` writable, clear it to `colour`, make it presentable.
-pub(crate) fn record_clear(
+/// Everything one frame draws with. Handles only, borrowed from their owners.
+pub(crate) struct FrameTarget {
+    pub(crate) image: vk::Image,
+    pub(crate) view: vk::ImageView,
+    pub(crate) extent: vk::Extent2D,
+}
+
+/// Records one frame: make the image drawable, clear it to `colour` and draw the
+/// triangle with dynamic rendering, then make it presentable.
+pub(crate) fn record_frame(
     device: &Device,
+    rendering: &khr::dynamic_rendering::Device,
     command_buffer: vk::CommandBuffer,
-    image: vk::Image,
+    target: &FrameTarget,
+    pipeline: vk::Pipeline,
     colour: [f32; 4],
 ) -> Result<(), GpuError> {
-    let to_transfer = vk::ImageMemoryBarrier::default()
+    let to_drawable = vk::ImageMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::empty())
-        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+        .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
         .old_layout(vk::ImageLayout::UNDEFINED) // "don't care what was there"
-        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+        .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(image)
+        .image(target.image)
         .subresource_range(COLOUR_RANGE);
     let to_present = vk::ImageMemoryBarrier::default()
-        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+        .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
         .dst_access_mask(vk::AccessFlags::empty())
-        .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+        .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(image)
+        .image(target.image)
         .subresource_range(COLOUR_RANGE);
-    let clear_value = vk::ClearColorValue { float32: colour };
+
+    let whole_image = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: target.extent,
+    };
+    // Load op CLEAR replaces § 5's cmd_clear_color_image.
+    let colour_attachments = [vk::RenderingAttachmentInfo::default()
+        .image_view(target.view)
+        .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        .load_op(vk::AttachmentLoadOp::CLEAR)
+        .store_op(vk::AttachmentStoreOp::STORE)
+        .clear_value(vk::ClearValue {
+            color: vk::ClearColorValue { float32: colour },
+        })];
+    let rendering_info = vk::RenderingInfo::default()
+        .render_area(whole_image)
+        .layer_count(1)
+        .color_attachments(&colour_attachments);
+    let viewport = vk::Viewport {
+        x: 0.0,
+        y: 0.0,
+        width: target.extent.width as f32,
+        height: target.extent.height as f32,
+        min_depth: 0.0,
+        max_depth: 1.0,
+    };
     let begin_info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-    // SAFETY: the caller waited on this slot's fence, so the GPU is no longer
-    // using `command_buffer`; `image` is a live swapchain image from acquire.
+    // SAFETY: the caller waited on this slot's fence, so the GPU is no longer using
+    // `command_buffer`; the image, view and pipeline are alive.
     unsafe {
         device.reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
         device.begin_command_buffer(command_buffer, &begin_info)?;
-        // Source stage TRANSFER matches the stage the submit waits on `image_free` at.
+        // Source stage matches the stage the submit waits on `image_free` at.
         device.cmd_pipeline_barrier(
             command_buffer,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             vk::DependencyFlags::empty(),
             &[],
             &[],
-            &[to_transfer],
+            &[to_drawable],
         );
-        device.cmd_clear_color_image(
-            command_buffer,
-            image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            &clear_value,
-            &[COLOUR_RANGE],
-        );
-        // The clear must finish before the frame counts as done.
+        rendering.cmd_begin_rendering(command_buffer, &rendering_info);
+        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
+        device.cmd_set_viewport(command_buffer, 0, &[viewport]);
+        device.cmd_set_scissor(command_buffer, 0, &[whole_image]);
+        // 3 vertices, 1 instance (copy), starting at vertex 0 and instance 0.
+        device.cmd_draw(command_buffer, 3, 1, 0, 0);
+        rendering.cmd_end_rendering(command_buffer);
+        // The drawing must finish before the frame counts as done.
         device.cmd_pipeline_barrier(
             command_buffer,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             vk::PipelineStageFlags::BOTTOM_OF_PIPE,
             vk::DependencyFlags::empty(),
             &[],

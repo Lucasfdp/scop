@@ -209,3 +209,40 @@ so it runs `build.rs`, which runs `glslc` and writes a new `.spv` into `OUT_DIR`
 `include_bytes!` in `main.rs` depends on that file, so scop is recompiled with the new
 bytes embedded, and the window shows a red triangle. If `glslc` reports an error in your
 GLSL, the *build* fails with that message — you never get a stale binary.
+
+## Section 7
+
+**A-7.1** A **`VkBuffer`** is a description — "N bytes, usable as a vertex buffer and as
+a copy destination" — with no storage. A **`VkDeviceMemory`** is an actual allocated
+block of memory, of one memory type. You bind the buffer to (part of) the memory. They're
+separate so the "what" and the "where" can be chosen independently: you ask the buffer
+what kind of memory it needs, pick a type, and — in bigger engines — put many buffers
+into one large allocation, because the number of allocations is limited and each one is
+slow.
+
+**A-7.2** With an index buffer: **4 vertices, 6 indices** (two triangles × 3). Without:
+**6 vertices**, two of them duplicates. For a square, that saves little. For a teapot,
+each corner is shared by around six triangles, so without indices you'd store each
+corner ~6 times: indices cut the vertex data by roughly that factor, and the GPU can
+reuse already-processed vertices instead of running the vertex shader again for the
+copies.
+
+**A-7.3** The submit returns immediately; the copy runs on the GPU **later**. Destroying
+the staging buffer (and freeing its memory) right away means the GPU may copy from
+memory that's already freed — **undefined behaviour**: garbage vertices, a corrupted
+shape, or a crash. Validation reports that the buffer (or memory) is destroyed while
+**still in use** by a pending command buffer. Fix: wait on the upload's fence (or the
+queue) before destroying it.
+
+**A-7.4** (a) **Staging:** memory `HOST_VISIBLE` (the CPU must map and write it) and
+`HOST_COHERENT` (so the writes are visible to the GPU without a manual flush); usage
+`TRANSFER_SRC` (it's copied *from*). (b) **Final vertex buffer:** memory `DEVICE_LOCAL`
+(fastest for the GPU, read every frame); usage `VERTEX_BUFFER` (bound as vertex input)
+and `TRANSFER_DST` (it's copied *into*).
+
+**A-7.5** The **shape stays correct** (positions are still read from offset 0), but the
+**colours are wrong**: each corner's "colour" is read from bytes 0..12 — its position x,
+its position y, and its real red value. So the colour becomes (x, y, red). Negative
+coordinates give negative values, which end up as 0 in the image, so corners on the left
+or top lose red/green. No error anywhere — the GPU reads bytes exactly as the packing
+list says.

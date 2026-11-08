@@ -58,14 +58,6 @@ impl Swapchain {
         let extent = choose_extent(&caps, window_size);
         let image_count = choose_image_count(&caps);
 
-        // § 5 clears the images directly, which is a transfer write.
-        let usage = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST;
-        if !caps.supported_usage_flags.contains(usage) {
-            return Err(GpuError::Unsupported(
-                "swapchain images can't be cleared (no TRANSFER_DST usage)",
-            ));
-        }
-
         let create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(image_count)
@@ -73,7 +65,7 @@ impl Swapchain {
             .image_color_space(format.color_space)
             .image_extent(extent)
             .image_array_layers(1)
-            .image_usage(usage)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT) // drawn into (§ 6)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(caps.current_transform)
             .composite_alpha(choose_composite_alpha(&caps))

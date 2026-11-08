@@ -2,7 +2,9 @@
 
 mod frames;
 pub mod gpu;
+pub mod pipeline;
 pub mod platform;
+pub mod spirv;
 mod swapchain;
 
 use std::fs;

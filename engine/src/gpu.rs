@@ -2,7 +2,8 @@
 //! logical device and swapchain.
 //!
 //! Creation order: loader → instance → debug messenger → surface → physical device
-//! (chosen) → logical device → queue (fetched) → swapchain → image views → frame slots.
+//! (chosen) → logical device → queue (fetched) → swapchain → image views → pipeline
+//! → frame slots.
 //! `Drop` waits for the GPU to go idle, then destroys in the mirror order.
 
 use std::ffi::{CStr, c_char, c_void};
@@ -11,7 +12,9 @@ use std::fmt;
 use ash::{Device, Entry, Instance, ext, khr, vk};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 
-use crate::frames::{self, Frames};
+use crate::frames::{self, FrameTarget, Frames};
+use crate::pipeline::{Pipeline, Shaders};
+use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
@@ -29,6 +32,8 @@ pub enum GpuError {
     WindowHandle(HandleError),
     /// The GPU or surface lacks something scop needs.
     Unsupported(&'static str),
+    /// Shader bytes that aren't valid SPIR-V.
+    Spirv(SpirvError),
 }
 
 impl fmt::Display for GpuError {
@@ -41,6 +46,7 @@ impl fmt::Display for GpuError {
             }
             GpuError::WindowHandle(e) => write!(f, "could not get the window's handles: {e}"),
             GpuError::Unsupported(what) => write!(f, "unsupported: {what}"),
+            GpuError::Spirv(e) => write!(f, "bad shader: {e}"),
         }
     }
 }
@@ -50,6 +56,12 @@ impl std::error::Error for GpuError {}
 impl From<ash::LoadingError> for GpuError {
     fn from(e: ash::LoadingError) -> Self {
         GpuError::Load(e)
+    }
+}
+
+impl From<SpirvError> for GpuError {
+    fn from(e: SpirvError) -> Self {
+        GpuError::Spirv(e)
     }
 }
 
@@ -81,6 +93,8 @@ pub struct GpuContext {
     queue_family_index: u32,
     swapchain_loader: khr::swapchain::Device,
     swapchain: Swapchain,
+    rendering_loader: khr::dynamic_rendering::Device,
+    pipeline: Pipeline,
     frames: Frames,
 }
 
@@ -98,12 +112,14 @@ pub enum FrameStatus {
 impl GpuContext {
     /// Sets up Vulkan for drawing into `window`.
     ///
-    /// `size` is the window's size in **physical** pixels (not logical points).
+    /// `size` is the window's size in **physical** pixels (not logical points);
+    /// `shaders` are the app's compiled SPIR-V, used to build the pipeline.
     /// The caller must drop the returned context before dropping the window.
     pub fn new(
         app_name: &CStr,
         window: &(impl HasDisplayHandle + HasWindowHandle),
         size: (u32, u32),
+        shaders: Shaders,
     ) -> Result<Self, GpuError> {
         let display_handle = window.display_handle()?.as_raw();
         let window_handle = window.window_handle()?.as_raw();
@@ -187,9 +203,22 @@ impl GpuContext {
             fail(e)
         })?;
 
+        // On Vulkan 1.2 the dynamic rendering functions come from the extension's
+        // own function table, not from `Device`.
+        let rendering_loader = khr::dynamic_rendering::Device::new(&instance, &device);
+        let pipeline = Pipeline::new(&device, swapchain.format.format, shaders).map_err(|e| {
+            // SAFETY: Pipeline cleaned up after itself; nothing has been submitted yet.
+            unsafe {
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
+
         let frames = Frames::new(&device, queue_family_index).map_err(|e| {
             // SAFETY: Frames cleaned up after itself; nothing has been submitted yet.
             unsafe {
+                pipeline.destroy(&device);
                 swapchain.destroy(&device, &swapchain_loader);
                 device.destroy_device(None);
             }
@@ -208,11 +237,13 @@ impl GpuContext {
             queue_family_index,
             swapchain_loader,
             swapchain,
+            rendering_loader,
+            pipeline,
             frames,
         })
     }
     /// Draws one frame: clears the next swapchain image to `colour` (linear RGBA,
-    /// 0.0–1.0) and shows it. The § 5 loop, in order:
+    /// 0.0–1.0), draws the triangle on it, and shows it. The § 5 loop, in order:
     /// wait fence → acquire → reset fence → record → submit → present.
     pub fn draw_frame(&mut self, colour: [f32; 4]) -> Result<FrameStatus, GpuError> {
         let slot = self.frames.current();
@@ -236,19 +267,31 @@ impl GpuContext {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => return Ok(FrameStatus::OutOfDate),
                 Err(e) => return Err(e.into()),
             };
-            let image = self.swapchain.images[image_index as usize];
+            let target = FrameTarget {
+                image: self.swapchain.images[image_index as usize],
+                view: self.swapchain.views[image_index as usize],
+                extent: self.swapchain.extent,
+            };
             let render_done = self.swapchain.render_done[image_index as usize];
 
             // 3. Acquire succeeded, so we're definitely submitting: switch the light off.
             self.device.reset_fences(&[slot.fence])?;
 
             // 4. Write the instruction sheet.
-            frames::record_clear(&self.device, slot.command_buffer, image, colour)?;
+            frames::record_frame(
+                &self.device,
+                &self.rendering_loader,
+                slot.command_buffer,
+                &target,
+                self.pipeline.handle,
+                colour,
+            )?;
 
-            // 5. Hand it over: wait for `image_free` before the clear (TRANSFER stage);
-            //    when finished, raise `render_done` and switch the fence on.
+            // 5. Hand it over: wait for `image_free` before the first write to the
+            //    image (COLOR_ATTACHMENT_OUTPUT stage); when finished, raise
+            //    `render_done` and switch the fence on.
             let wait_semaphores = [slot.image_free];
-            let wait_stages = [vk::PipelineStageFlags::TRANSFER];
+            let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
             let command_buffers = [slot.command_buffer];
             let signal_semaphores = [render_done];
             let submit = vk::SubmitInfo::default()
@@ -346,6 +389,7 @@ impl Drop for GpuContext {
             // wait itself fails, the device is lost and there's nothing left to wait for.
             let _ = self.device.device_wait_idle();
             self.frames.destroy(&self.device);
+            self.pipeline.destroy(&self.device);
             self.swapchain.destroy(&self.device, &self.swapchain_loader);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);
@@ -504,8 +548,8 @@ unsafe extern "system" fn debug_callback(
     vk::FALSE // "don't abort the call that triggered this"
 }
 
-/// Returns the first GPU that supports the swapchain extension and has one queue
-/// family that can both draw and present to `surface`, plus that family's index.
+/// Returns the first GPU that supports the swapchain and dynamic rendering, and has
+/// one queue family that can both draw and present to `surface`, plus that family's index.
 fn pick_physical_device(
     instance: &Instance,
     surface_loader: &khr::surface::Instance,
@@ -513,8 +557,13 @@ fn pick_physical_device(
 ) -> Result<(vk::PhysicalDevice, u32), GpuError> {
     // SAFETY: plain queries on a live instance and surface.
     let devices = unsafe { instance.enumerate_physical_devices()? };
+    let mut lacks_dynamic_rendering = false;
     for device in devices {
         if !has_device_extension(instance, device, khr::swapchain::NAME)? {
+            continue;
+        }
+        if !supports_dynamic_rendering(instance, device)? {
+            lacks_dynamic_rendering = true;
             continue;
         }
         let families = unsafe { instance.get_physical_device_queue_family_properties(device) };
@@ -529,7 +578,28 @@ fn pick_physical_device(
             }
         }
     }
+    if lacks_dynamic_rendering {
+        return Err(GpuError::Unsupported(
+            "VK_KHR_dynamic_rendering (the GPU driver may be too old)",
+        ));
+    }
     Err(GpuError::NoSuitableGpu)
+}
+
+/// Dynamic rendering needs both: the extension listed, and its feature switch supported.
+fn supports_dynamic_rendering(
+    instance: &Instance,
+    device: vk::PhysicalDevice,
+) -> Result<bool, GpuError> {
+    if !has_device_extension(instance, device, khr::dynamic_rendering::NAME)? {
+        return Ok(false);
+    }
+    // Ask for the feature by chaining its struct onto the query (the pNext idea from § 3).
+    let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default();
+    let mut features = vk::PhysicalDeviceFeatures2::default().push_next(&mut dynamic_rendering);
+    // SAFETY: plain query on a live instance; the chained struct outlives the call.
+    unsafe { instance.get_physical_device_features2(device, &mut features) };
+    Ok(dynamic_rendering.dynamic_rendering == vk::TRUE)
 }
 
 fn has_device_extension(
@@ -547,9 +617,12 @@ fn create_device(
     physical_device: vk::PhysicalDevice,
     queue_family_index: u32,
 ) -> Result<Device, GpuError> {
-    // Swapchain: checked by `pick_physical_device`. Portability subset: MoltenVK
-    // lists it and requires it to be enabled if listed.
-    let mut extensions = vec![khr::swapchain::NAME.as_ptr()];
+    // Swapchain and dynamic rendering: checked by `pick_physical_device`.
+    // Portability subset: MoltenVK lists it and requires it to be enabled if listed.
+    let mut extensions = vec![
+        khr::swapchain::NAME.as_ptr(),
+        khr::dynamic_rendering::NAME.as_ptr(),
+    ];
     if has_device_extension(instance, physical_device, khr::portability_subset::NAME)? {
         extensions.push(khr::portability_subset::NAME.as_ptr());
     }
@@ -558,9 +631,13 @@ fn create_device(
     let queue_info = vk::DeviceQueueCreateInfo::default()
         .queue_family_index(queue_family_index)
         .queue_priorities(&priorities);
+    // Enabling the extension adds its functions; the feature switch must also be on.
+    let mut dynamic_rendering =
+        vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
     let create_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(std::slice::from_ref(&queue_info))
-        .enabled_extension_names(&extensions);
+        .enabled_extension_names(&extensions)
+        .push_next(&mut dynamic_rendering);
 
     // SAFETY: every pointer in `create_info` points to data alive until this call returns.
     Ok(unsafe { instance.create_device(physical_device, &create_info, None)? })

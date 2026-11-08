@@ -1,7 +1,7 @@
 # Progress
 
-**Current section:** 6
-**Last session:** 2026-11-07
+**Current section:** 7
+**Last session:** 2026-11-08
 
 ## Sections
 
@@ -12,7 +12,8 @@
 | 3 | done | passed after misses (destroy order; portability opt-in; Clone = copied handle → double destroy) — checkpoint code by Claude, verified on Mac (GPU line, validation leak test); explain-back passed with misses (only `?` calls `From`; get/enumerate vs create; push_next timing; queue-priorities list) | 2026-11-06 | paused | Q-3.2 narrowed to one sentence by owner's choice (no OS-level detail) |
 | 4 | done | passed after misses (why surfaces are an extension; request min+1 not 0; physical vs logical extent; 0×0 extent on minimise; instance needs window-system extensions) — checkpoint code by Claude, verified on Mac (B8G8R8A8_SRGB, FIFO, 2560x1440, 3 images) ; explain-back passed with misses (present check → swapchain creation; exists vs enabled; image-count clamp) | 2026-11-06 | paused | |
 | 5 | done | passed after misses (semaphores: CPU never waits; why unsignalled fence hangs; reset_fences between acquire and submit; final barrier = layout change) — checkpoint code by Claude, verified on Mac (pulsing blue, clean exit, unsignalled-fence hang test) ; explain-back passed with misses (access mask = what the next/previous work does to memory; render_done per image because the screen holds it; device_wait_idle = 'in use', not order) | 2026-11-07 | paused | Added 'frames, frame slots and images' explainer after confusion |
-| 6–19 | not written | — | | — | Written on arrival |
+| 6 | done | passed after misses (rasteriser interpolates, not the fragment shader; size must match = viewport/scissor ← extent; build time vs run time: glslc errors stop the build) — checkpoint code by Claude verified on Mac (RGB triangle, write-mask test) ; explain-back passed with misses (include_bytes! copies bytes, not the path; length check guards words[0]; pipeline compiles its own copy of the shaders; wait at the first stage that touches the image) | 2026-11-07 | paused | Decisions: dynamic rendering, build.rs + glslc |
+| 7–19 | not written | — | | — | Written on arrival |
 
 ## Prerequisite audit (2026-11-02)
 - Rust: new. C/C++ and pointers: known.
@@ -29,6 +30,11 @@
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
 | Why the portability extension + flag exist (one sentence: loader hides MoltenVK unless you opt in) — fresh variant | § 3 | 0 | after § 5 |
+| `include_bytes!` embeds bytes vs reading a path at run time — fresh variant | § 6 explain-back | 0 | after § 8 |
+| Why shader modules can be destroyed after pipeline creation (driver compiles its own copy) — fresh variant | § 6 explain-back | 0 | after § 8 |
+| Semaphore wait stage = first stage that touches the image — fresh variant | § 6 explain-back | 0 | after § 8 |
+| Who interpolates (rasteriser) vs who decides the final colour (fragment shader) — fresh variant | § 6 | 0 | after § 8 |
+| Build time (glslc, rustc) vs run time (validation, hangs) — fresh variant | § 6 | 0 | after § 8 |
 | Access masks: barrier 1 dst `TRANSFER_WRITE` / barrier 2 src `TRANSFER_WRITE` — what each orders — fresh variant | § 5 explain-back | 0 | after § 7 |
 | Why `device_wait_idle` before teardown (objects still *in use*, not wrong order) — fresh variant | § 5 explain-back | 0 | after § 7 |
 | Where `reset_fences` goes and why (after acquire, before submit) — fresh variant | § 5 | 0 | after § 7 |
@@ -43,10 +49,10 @@
 | Which calls you must destroy (`create_*`/`allocate_*`) vs not (`get_*`/`enumerate_*`) — fresh variant | § 3 explain-back | 0 | after § 5 |
 | Only `?` calls `From`; `return Err(x)` needs x already the right type — fresh variant | § 3 explain-back | 0 | after § 5 |
 | Move vs clone: a move *transfers* ownership (old variable unusable), `Clone` *duplicates* it — fresh variant | § 3 | 0 | after § 5 |
-| Q-1.5 (dangling CString pointer — ask a fresh variant) | § 1 | 0 | after § 3 |
-| Stdout vs stderr redirect (`>` vs `2>`) — fresh variant | § 1 | 0 | after § 3 |
+| Q-1.5 (dangling CString pointer — ask a fresh variant) | § 1 | 1 (2026-11-08; said "end of scope" — it is end of statement) | after § 10 |
+| Stdout vs stderr redirect (`>` vs `2>`) — fresh variant | § 1 | 1 (2026-11-06, § 5 walkthrough: println vs eprintln with `2>`) | after § 8 |
 | Who converts errors for `?` (`From` impl) — fresh variant | § 2 | 0 | after § 4 |
-| Q-1.3 (drop order fields vs locals — fresh variant) | § 1 | 0 | after § 3 |
+| Q-1.3 (drop order fields vs locals — fresh variant) | § 1 | 1 (2026-11-08) | after § 10 |
 
 ## Open threads
 - 2026-11-04: Spanish (learn_es/) paused from § 3 on, by owner's choice — catch up all sections at the end. `check_learn.py` parity errors for § 3+ are expected until then.
