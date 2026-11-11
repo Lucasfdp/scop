@@ -2,7 +2,7 @@
 section: 9
 slug: maths-for-3d
 tier: T1
-status: in-progress
+status: done
 prereqs: [2]
 terms: [vector, point vs direction, dot product, cross product, normalise, matrix, transform, homogeneous coordinates, translation matrix, rotation matrix, scale matrix, composition, model matrix, view matrix, projection matrix, perspective divide, field of view, aspect ratio, near and far planes, column-major, radians, operator overloading, epsilon comparison]
 ---
@@ -28,8 +28,15 @@ perspective**. Every corner has to be *moved*, *turned* and *squashed onto the s
 every frame, for every corner. That's what matrices are for.
 
 Start with arrows. A **vector** is three numbers (x, y, z). It can mean a **place**
-("the corner is at 2 right, 1 up, 0 forward") or a **step** ("move 2 right, 1 up").
+("the corner is at 2 right, 1 up, 0 forward") or a **direction** — an arrow that says
+*which way*, but isn't anywhere in particular ("the tabletop faces up": (0, 1, 0)).
 Same three numbers, different meaning — and that difference will matter.
+
+Picture a table. Its four corners are **places**. "Which way the top faces" is a
+**direction**. Slide the table across the room: every corner's place changes, but the
+top still faces up — the direction must *not* change. Turn the table on its side: now
+both change — the corners move *and* the top faces sideways. So: **moving affects places
+only; turning affects both.**
 
 Now recipes. Imagine a recipe card that says "take any point and move it 3 to the
 right". Another says "turn any point 30° around the vertical axis". A **matrix** is such a
@@ -57,9 +64,11 @@ order much. Matrices always do — `A × B` and `B × A` are generally different
 
 **vector** — `Vec3 { x, y, z }`: three numbers. Length = how far; direction = which way.
 
-**point vs direction** — the same three numbers mean a *place* or a *step*. Moving a
-model moves its places, but must not change its directions (a "this way is up" arrow
-stays pointing up wherever the model is). The 4th number below handles that.
+**point vs direction** — the same three numbers mean a *place* (a corner) or a
+*direction* (an arrow: "which way", not "where" — like the way a face points, used for
+lighting later). Moving a model moves its places but must not change its directions;
+turning it changes both. Nobody checks this by hand: the 4th number below makes the
+maths do it automatically.
 
 **dot product** — `a · b = ax·bx + ay·by + az·bz`, one number. For two length-1 vectors
 it's the cosine of the angle between them: 1 = same way, 0 = at right angles, −1 =
@@ -76,10 +85,12 @@ recipe; multiplying two matrices makes a combined recipe.
 
 **transform** — any change applied to every point: move, turn, resize, project.
 
-**homogeneous coordinates** — writing a 3D point with a **4th number `w`**: points get
+**homogeneous coordinates** — writing a 3D vector with a **4th number `w`**: points get
 `w = 1`, directions get `w = 0`. A 3×3 grid can turn and resize but can't *move*; the
-4th row and column can, and the move only affects things with `w = 1` — so directions are
-left alone automatically. "Homogeneous" just names this four-number trick.
+4th column holds the move, and it gets **multiplied by `w`**: for a point, ×1 = moved;
+for a direction, ×0 = the move disappears. Example, moving by (5, 0, 0): new x =
+x + 5·w, so the corner (1, 2, 0, **1**) → (6, 2, 0), but the arrow (0, 1, 0, **0**) →
+(0, 1, 0). "Homogeneous" just names this four-number trick.
 
 **translation matrix** — moves points by (tx, ty, tz). The numbers sit in the 4th column.
 

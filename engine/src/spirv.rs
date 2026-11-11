@@ -37,8 +37,10 @@ pub fn words_from_bytes(bytes: &[u8]) -> Result<Vec<u32>, SpirvError> {
         return Err(SpirvError::BadLength(bytes.len()));
     }
     let words: Vec<u32> = bytes
-        .chunks_exact(4)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) // lowest byte first
+        .as_chunks::<4>()
+        .0 // full 4-byte chunks; the length check above means there's no leftover
+        .iter()
+        .map(|b| u32::from_le_bytes(*b)) // lowest byte first
         .collect();
     if words[0] != MAGIC {
         return Err(SpirvError::BadMagic(words[0]));

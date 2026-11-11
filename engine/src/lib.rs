@@ -8,6 +8,7 @@ mod buffer;
 mod frames;
 mod gpu;
 mod input;
+mod maths;
 mod mesh;
 mod pipeline;
 mod platform;
@@ -17,6 +18,7 @@ mod swapchain;
 // The whole public API.
 pub use app::{App, Flow, Frame, Gfx, GpuInfo, MeshId, PipelineId};
 pub use input::{Input, Key};
+pub use maths::{Mat4, Vec3, Vec4};
 pub use mesh::{MeshData, Vertex};
 pub use pipeline::Shaders;
 pub use platform::{RunError, WindowConfig, run};

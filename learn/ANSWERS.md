@@ -312,3 +312,36 @@ its position, and the perspective divide then scales points unevenly: the model 
 distorted, flips, shoots off screen, or vanishes. Rotations come out turning the
 opposite way. No error is reported anywhere — which is why the storage order is fixed
 once and tested.
+
+## Section 10
+
+**A-10.1** The **camera** (`projection × view`) goes in a **uniform buffer**, reached through
+a descriptor set: it changes at most once per frame and is the same for every object, so
+it's written once and shared by every draw. The **model** matrix goes in a **push
+constant**: it's different for every object, and push constants travel inside the command
+buffer, so each draw can carry its own value at no extra cost. (Both would fit in 128
+bytes of push constants, but that uses all the guaranteed space, and the descriptor
+machinery is needed in § 14 anyway.)
+
+**A-10.2** While the GPU is still reading the camera for frame N (slot A), the CPU writes
+frame N+1's camera (slot B) into **the same buffer**. Frame N can then be drawn partly or
+wholly with the *next* frame's camera: occasional one-frame jumps or jitter, mostly
+visible when the camera moves fast. It's a race, so it may look fine on one machine and
+not another. The validation layer normally reports **nothing**: every call is valid on its
+own; the problem is *timing*. One buffer per slot, written after that slot's fence wait,
+fixes it.
+
+**A-10.3** The `1.0` is `w`: the corner is a **point**, so the model matrix's translation
+applies to it (§ 9). Read right to left: first `push.model` places and turns the corner
+in the world, then `camera.view_proj` applies the view (camera) and then the projection.
+So model → view → projection, i.e. `P × V × M × corner`.
+
+**A-10.4** A descriptor **points at** the buffer; it doesn't hold a copy of the data. The
+shader reads whatever bytes are in the buffer *when the GPU runs the draw*, so changing
+the buffer's contents is enough. A new descriptor write is only needed if the set must
+point at a **different resource**: another buffer, a different offset or size, or (§ 14)
+a different texture.
+
+**A-10.5** The cube looks **stretched sideways** (twice as wide as it should be), because
+the projection still uses the old width ÷ height. It should come from the **current
+swapchain image size every frame** (`frame.aspect()`), so it's always right after a resize.

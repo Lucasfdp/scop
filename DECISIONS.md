@@ -124,3 +124,16 @@ every app); the app owning the loop (fights `winit` 0.30's callback model).
 methods without breaking existing apps; apps never depend on `ash` or `winit`.
 **Cost accepted:** a fixed call order (setup → update → draw) that apps must fit into.
 **Revisit if:** a project needs several windows or its own loop timing (ft_vox?).
+
+## 2026-11-11 — Camera in a per-slot uniform buffer, model matrix as a push constant
+**Chose:** `projection × view` in one persistently mapped `HOST_VISIBLE | HOST_COHERENT`
+uniform buffer **per frame slot**, reached through a descriptor set (set 0, binding 0);
+each draw's model matrix as a 64-byte push constant. One pipeline layout shared by all
+engine pipelines.
+**Rejected:** both matrices as push constants (fits in 128 bytes, but fills the guaranteed
+space and postpones descriptors to § 14's harder case); both in uniform buffers
+(per-object regions or dynamic offsets — bookkeeping for nothing).
+**Why:** each value sits where its update rate says it belongs (per-frame vs per-draw);
+descriptors are learned on the simplest resource first; the pattern carries to ft_vox.
+**Cost accepted:** more Vulkan objects (set layout, pool, sets, two buffers) to create and destroy.
+**Revisit if:** per-draw data grows past ~64 bytes (move it to a buffer with dynamic offsets).

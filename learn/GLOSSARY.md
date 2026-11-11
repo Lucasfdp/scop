@@ -838,3 +838,92 @@ creation). `KHR` = official Khronos, `EXT` = multi-vendor.
 ### epsilon comparison
 **Plain:** treating two floats as equal if their difference is below a tiny threshold, because of rounding.
 **Introduced in:** § 9
+
+## Section 10 — Passing per-frame data to shaders
+
+### uniform
+**Plain:** a shader input with the same value for every corner and pixel of a draw.
+**Precise:** GLSL `uniform` block; fed by a descriptor (buffer) or by push constants.
+Opposite of per-corner inputs from the vertex buffer.
+**Introduced in:** § 10
+
+### per-frame vs per-draw data
+**Plain:** per-frame = changes at most once per frame, shared by every draw (camera);
+per-draw = can differ between draws in one frame (each object's model matrix).
+**Introduced in:** § 10
+
+### push constant
+**Plain:** a small block of bytes recorded straight into the command buffer for the next draws — the "sticky note".
+**Precise:** `cmd_push_constants`; at least 128 bytes guaranteed (`maxPushConstantsSize`).
+*Push* = pushed into the recording; *constant* = fixed for the draw that reads it.
+**Introduced in:** § 10
+
+### push constant range
+**Plain:** the declaration "shaders read push-constant bytes from here to here, in this stage".
+**Precise:** `VkPushConstantRange { stage_flags, offset, size }`, part of the pipeline layout.
+**Introduced in:** § 10
+
+### stage flags
+**Plain:** which shader stages can see an input.
+**Precise:** `VkShaderStageFlags` — `VERTEX`, `FRAGMENT`, … Wrong stage = validation error.
+**Introduced in:** § 10
+
+### pipeline layout
+**Plain:** the pipeline's list of outside inputs — like a function signature for its extra parameters.
+**Precise:** `VkPipelineLayout`: descriptor set layouts + push constant ranges. Shaders may
+only read what it declares. Pipelines sharing a layout keep bound sets across `cmd_bind_pipeline`.
+**Introduced in:** § 10 (empty since § 6)
+
+### uniform buffer
+**Plain:** a buffer the shader reads as uniform data — the "noticeboard".
+**Precise:** `VkBuffer` with usage `UNIFORM_BUFFER`. OpenGL name: UBO, Uniform Buffer Object.
+**Introduced in:** § 10
+
+### persistently mapped
+**Plain:** map the buffer once and keep the CPU pointer for its whole life.
+**Precise:** no map/unmap per frame; works without flushes on `HOST_COHERENT` memory.
+**Introduced in:** § 10
+
+### descriptor
+**Plain:** a tiny record telling a shader where a resource is — it points at the data, it isn't the data.
+**Precise:** e.g. `VkDescriptorBufferInfo { buffer, offset, range }` written into a set.
+**Introduced in:** § 10
+
+### descriptor set layout
+**Plain:** the shape of a descriptor set, like a struct declaration.
+**Precise:** `VkDescriptorSetLayout`: per binding — type, count, stage flags.
+**Introduced in:** § 10
+
+### descriptor pool
+**Plain:** where descriptor sets are allocated from, sized up front.
+**Precise:** `VkDescriptorPool`; destroying it frees every set allocated from it (like the command pool, § 5).
+**Introduced in:** § 10
+
+### descriptor set
+**Plain:** a group of descriptors attached in one call — an instance of a set layout.
+**Precise:** `VkDescriptorSet`, allocated from a pool, filled by descriptor writes.
+**Introduced in:** § 10
+
+### set and binding numbers
+**Plain:** the shader's two-level address for a descriptor.
+**Precise:** GLSL `layout(set = S, binding = B)`: set slot S, entry B inside that set.
+**Introduced in:** § 10
+
+### descriptor write
+**Plain:** making a set's entry point at a particular resource. Done once; afterwards change the contents, not the pointer.
+**Precise:** `VkWriteDescriptorSet` + `update_descriptor_sets`.
+**Introduced in:** § 10
+
+### binding a descriptor set
+**Plain:** recording "from now on, set slot 0 is this set" into the command buffer.
+**Precise:** `cmd_bind_descriptor_sets(cmd, GRAPHICS, layout, first_set, sets, dynamic_offsets)`.
+**Introduced in:** § 10
+
+### std140
+**Plain:** GLSL's rule for laying out a uniform block's bytes; a `mat4` is 64 bytes, column by column.
+**Precise:** **st**andar**d** layout from GLSL **1.40**. Trap: `vec3` occupies 16 bytes. scop sends only `mat4`s.
+**Introduced in:** § 10
+
+### view-projection matrix
+**Plain:** `projection × view` combined once per frame on the CPU, so the shader multiplies by fewer matrices.
+**Introduced in:** § 10

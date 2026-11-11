@@ -188,9 +188,9 @@ impl GpuContext {
         };
 
         let (physical_device, queue_family_index) =
-            pick_physical_device(&instance, &surface_loader, surface).map_err(&fail)?;
+            pick_physical_device(&instance, &surface_loader, surface).map_err(fail)?;
         let device =
-            create_device(&instance, physical_device, queue_family_index).map_err(&fail)?;
+            create_device(&instance, physical_device, queue_family_index).map_err(fail)?;
 
         // SAFETY: family `queue_family_index` was requested with 1 queue, so index 0 exists.
         let queue = unsafe { device.get_device_queue(queue_family_index, 0) };

@@ -1,7 +1,7 @@
 # Progress
 
-**Current section:** 9
-**Last session:** 2026-11-08
+**Current section:** 10
+**Last session:** 2026-11-11
 
 ## Sections
 
@@ -15,7 +15,9 @@
 | 6 | done | passed after misses (rasteriser interpolates, not the fragment shader; size must match = viewport/scissor ← extent; build time vs run time: glslc errors stop the build) — checkpoint code by Claude verified on Mac (RGB triangle, write-mask test) ; explain-back passed with misses (include_bytes! copies bytes, not the path; length check guards words[0]; pipeline compiles its own copy of the shaders; wait at the first stage that touches the image) | 2026-11-07 | paused | Decisions: dynamic rendering, build.rs + glslc |
 | 7 | done | passed after misses (usage = what the GPU may do; 6 indices, corners stored once; submit returns before the copy runs; memory vs usage flags vs index type) — checkpoint code by Claude verified on Mac (4-colour quad, clean exit, index test) ; explain-back passed with misses (memory_type_bits = allowed types; upload fence/barrier vs frame loop; struct literals need every field) | 2026-11-08 | paused | Decision: staging → device-local |
 | 8 | done | passed after misses (handles stop GPU use-after-free, not just lost references; pub = scop writes the name, pub(crate) = other engine modules, private = this file) — checkpoint code by Claude ; explain-back passed (dt explained on request; validate ids before acquire/reset_fences — answer echoed the walkthrough, check again) | 2026-11-08 | paused | Decision: App trait |
-| 9–19 | not written | — | | — | Written on arrival |
+| 9 | done | passed after misses (why 4×4: 3×3 has no slot for a move; cards chain with ×, swap whole cards not their arguments; flipped matrix: move feeds w per corner → warped, not just smaller) — checkpoint code by Claude (maths.rs, 18 tests, verified on Mac) ; explain-back passed with misses (private = this file, not the engine; paper [row][col] vs memory [col][row]; `+1` in row 3 gives w = −4, not −1; y-flip test divides by w, not y) | 2026-11-11 | paused | Walked through in 5 stops (w, cards as code lines, order, perspective, memory layout) |
+| 10 | in-progress | — | 2026-11-11 | paused | Section written; gate not yet attempted |
+| 11–19 | not written | — | | — | Written on arrival |
 
 ## Prerequisite audit (2026-11-02)
 - Rust: new. C/C++ and pointers: known.
@@ -31,6 +33,10 @@
 
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
+| Perspective divide is by w (= distance), not by y; why row 3 has −1 (camera looks down −z → negative w would be culled) — fresh variant | § 9 explain-back | 0 | after § 11 |
+| Why 4×4 and not 3×3: a 3×3 mix of x,y,z can never move (0,0,0); the 4th column holds the move, × w — fresh variant | § 9 | 0 | after § 11 |
+| Chaining cards: × (never +), right to left, swap whole cards not their arguments — fresh variant | § 9 | 0 | after § 11 |
+| Row- vs column-major mix-up: the move lands in the w row → w differs per corner → warped/garbage, model doesn't move — fresh variant | § 9 | 0 | after § 11 |
 | Why the portability extension + flag exist (one sentence: loader hides MoltenVK unless you opt in) — fresh variant | § 3 | 0 | after § 5 |
 | Why validate draw ids before acquire/reset_fences (half-done frame = fence off with no job → hang) — fresh variant | § 8 explain-back | 0 | after § 10 |
 | pub vs pub(crate) vs private — who writes the name (fresh variant) | § 8 | 0 | after § 10 |
@@ -40,8 +46,8 @@
 | `include_bytes!` embeds bytes vs reading a path at run time — fresh variant | § 6 explain-back | 0 | after § 8 |
 | Why shader modules can be destroyed after pipeline creation (driver compiles its own copy) — fresh variant | § 6 explain-back | 0 | after § 8 |
 | Semaphore wait stage = first stage that touches the image — fresh variant | § 6 explain-back | 0 | after § 8 |
-| Who interpolates (rasteriser) vs who decides the final colour (fragment shader) — fresh variant | § 6 | 0 | after § 8 |
-| Build time (glslc, rustc) vs run time (validation, hangs) — fresh variant | § 6 | 0 | after § 8 |
+| Who interpolates (rasteriser) vs who decides the final colour (fragment shader) — fresh variant | § 6 | 1 (2026-11-08) | after § 11 |
+| Build time (glslc, rustc) vs run time (validation, hangs) — fresh variant; MISSED again 2026-11-08 (swapped them: confuses "debug build" with "build time") | § 6 | 0 | after § 9 |
 | Access masks: barrier 1 dst `TRANSFER_WRITE` / barrier 2 src `TRANSFER_WRITE` — what each orders — fresh variant | § 5 explain-back | 0 | after § 7 |
 | Why `device_wait_idle` before teardown (objects still *in use*, not wrong order) — fresh variant | § 5 explain-back | 0 | after § 7 |
 | Where `reset_fences` goes and why (after acquire, before submit) — fresh variant | § 5 | 0 | after § 7 |
