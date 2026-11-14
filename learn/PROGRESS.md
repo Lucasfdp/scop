@@ -1,6 +1,6 @@
 # Progress
 
-**Current section:** 12
+**Current section:** 13
 **Last session:** 2026-11-11
 
 ## Sections
@@ -18,7 +18,8 @@
 | 9 | done | passed after misses (why 4×4: 3×3 has no slot for a move; cards chain with ×, swap whole cards not their arguments; flipped matrix: move feeds w per corner → warped, not just smaller) — checkpoint code by Claude (maths.rs, 18 tests, verified on Mac) ; explain-back passed with misses (private = this file, not the engine; paper [row][col] vs memory [col][row]; `+1` in row 3 gives w = −4, not −1; y-flip test divides by w, not y) | 2026-11-11 | paused | Walked through in 5 stops (w, cards as code lines, order, perspective, memory layout) |
 | 10 | done | passed after misses (Q-10.1 needed the 'why': update rate / who shares it; Q-10.2 thought the shared buffer gets destroyed + validation catches it — it's overwritten mid-read, a silent race; Q-10.3 took `1.0` for the distance — it's w = point going in; Q-10.4 descriptor = pointer, write only for a different resource; Q-10.5 unsure stretch vs squash — stretched sideways) — checkpoint code by Claude (shader_inputs.rs, push constants, spinning cube) verified on Mac (clean run, cube spins) ; explain-back passed with misses (bind ≠ write: `update_descriptor_sets` once at startup, `cmd_bind_descriptor_sets` per frame — `cmd_` = recorded each frame; staging is chosen by how often the CPU writes, not error-checking — camera written every frame, mesh once; `ShaderInputs` owns the pipeline layout, not shader bytes → pipelines destroyed first) | 2026-11-13 | paused | Section written 2026-11-11 |
 | 11 | done | passed with small misses (Q-11.1: first comparison is against the cleared 1.0, not 0; Q-11.3: near = 0.1 is a distance, after projection depths are 0..1 with near → 0; Q-11.2 added a wrong side claim that depth-write-off causes validation errors) — checkpoint code by Claude (depth.rs, depth test LESS, per-frame barrier + cleared attachment) verified on Mac (no back faces, GREATER → background only) ; explain-back passed with misses (barrier missing → frame N+1's clear races frame N's tests: one-frame flicker, silent; depth image must cover every pixel of the render area — smaller = validation error / pixels with no depth slot) | 2026-11-14 | paused | Section written 2026-11-14 |
-| 12–19 | not written | — | | — | Written on arrival |
+| 12 | done | passed after misses (Q-12.2: fan starts from the first corner on the line, not the one nearest the origin — fresh variant passed; Q-12.5 asked for the 2-card at-origin version; Q-12.1 forgot the skipped lines) — checkpoint code by Claude (engine obj.rs: parse_obj, ObjModel, ObjError; scop loads/centres/frames the model) verified on Mac (42.obj, teapot, teapot2 render upright, clean) ; explain-back passed (added: positions.len() also resolves negative indices; line-free helpers are simpler/testable) | 2026-11-14 | paused | Section written 2026-11-14 |
+| 13–19 | not written | — | | — | Written on arrival |
 
 ## Prerequisite audit (2026-11-02)
 - Rust: new. C/C++ and pointers: known.
@@ -34,6 +35,7 @@
 
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
+| Fan triangulation: first corner on the `f` line + each next edge, then −1 — fresh variant | § 12 | 0 | after § 14 |
 | Why the depth image must match the swapchain size (one depth slot per pixel; render area ≤ attachment size) — fresh variant | § 11 explain-back | 0 | after § 13 |
 | Depth: cleared to 1.0, LESS wins; distances (near = 0.1) vs depth values (0..1 after projection) — fresh variant | § 11 | 0 | after § 13 |
 | `update_descriptor_sets` (aim the pointer, once) vs `cmd_bind_descriptor_sets` (pass it in, every frame — `cmd_` rule) — fresh variant | § 10 explain-back | 0 | after § 12 |

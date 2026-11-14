@@ -1029,3 +1029,65 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### winding order
 **Plain:** whether a triangle's corners go round clockwise or counter-clockwise on screen; culling uses it to tell front from back.
 **Introduced in:** § 11
+
+## Section 12 — Reading .obj files
+
+### Wavefront OBJ
+**Plain:** the `.obj` text format: one instruction per line. From Wavefront Technologies' 1980s software.
+**Introduced in:** § 12
+
+### vertex line
+**Plain:** `v x y z` — one corner's position. Corners are numbered in file order, from 1.
+**Introduced in:** § 12
+
+### face line
+**Plain:** `f a b c …` — one polygon, listing its corners by number (3 or more).
+**Introduced in:** § 12
+
+### 1-based index
+**Plain:** counting from 1. `.obj` corner `n` is `positions[n − 1]`.
+**Introduced in:** § 12
+
+### negative index
+**Plain:** `−k` = the k-th most recent corner defined so far (−1 = the last). Index = `len − k`.
+**Introduced in:** § 12
+
+### face token
+**Plain:** one item of a face line: `5`, `5/2`, `5/2/7` or `5//7` — corner / texture coordinate / normal. scop uses the first part.
+**Introduced in:** § 12
+
+### texture coordinate and normal lines
+**Plain:** `vt u v` (where on an image a corner sits) and `vn x y z` (which way the surface faces). Skipped in § 12.
+**Introduced in:** § 12
+
+### material library
+**Plain:** `mtllib file.mtl` / `usemtl name` — colours in a separate `.mtl` file. Skipped: the subject wants greys.
+**Introduced in:** § 12
+
+### triangulation
+**Plain:** cutting a polygon into triangles, because the GPU only draws triangles.
+**Introduced in:** § 12
+
+### fan triangulation
+**Plain:** keep the first corner and pair it with each next edge: `a b c d e` → `a b c`, `a c d`, `a d e`. Correct for convex faces.
+**Introduced in:** § 12
+
+### convex and concave
+**Plain:** convex = every corner points outwards (a fan always works); concave = some corner points inwards (a fan can draw outside the shape — § 17 bonus).
+**Introduced in:** § 12
+
+### bounding box
+**Plain:** the smallest axis-aligned box containing every corner: min and max of each coordinate.
+**Introduced in:** § 12
+
+### model centre
+**Plain:** the middle of the bounding box, `(min + max) / 2` — what the model spins around.
+**Introduced in:** § 12
+
+### framing
+**Plain:** choosing the camera distance so the whole model fits: `radius / sin(fov_y / 2)`.
+**Introduced in:** § 12
+
+### parse error with line number
+**Plain:** a broken file gives `file:17: reason` and a clean failure exit — never a panic.
+**Introduced in:** § 12

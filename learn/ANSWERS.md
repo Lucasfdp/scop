@@ -371,3 +371,26 @@ memory, which saves bandwidth.
 `near`, surfaces farther away get almost the same depth numbers, so rounding picks the
 winner pixel by pixel: flickering stripes. It shows first **where two faces are close
 together and far from the camera** (edges where faces meet, the far side of the model).
+
+## Section 12
+
+**A-12.1** **`v`** (a corner's position) and **`f`** (a face, listing corners by
+number). Everything else is skipped: comments (`#`), `o` / `g` (object and group
+names), `s` (smoothing), `mtllib` / `usemtl` (materials), `vt` / `vn` (texture
+coordinates, normals), `l` / `p` (lines, points), blank lines.
+
+**A-12.2** Corners 16, 2, 3, 17 → 0-based 15, 1, 2, 16. Fan from the first corner:
+**(15, 1, 2)** and **(15, 2, 16)**.
+
+**A-12.3** Every face would connect the *next* corner along instead of the right one, so
+the logo turns into a tangle of wrong, spiky triangles. A face using corner 42 would ask
+for `positions[42]`, but only indices 0..41 exist: a panic (index out of bounds) if
+unchecked, or — with the parser's range check — a clean error with the line number.
+
+**A-12.4** Some fan triangles can cover area **outside** the L (across the inner corner),
+so the face looks like it has an extra triangle filled in, and parts may overlap. That's
+fine for the mandatory files; handling concave faces properly is the § 17 bonus.
+
+**A-12.5** `model = rotation_y(angle) × translation(−centre)` — right to left: move the
+centre onto the origin, then turn. The centre is the middle of the **bounding box**:
+`(min + max) / 2` of all the corners, computed by the parser.

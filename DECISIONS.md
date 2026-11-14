@@ -152,3 +152,16 @@ guarantee consistent winding — a mixed-winding model would lose faces).
 queue); hidden back faces are still shaded before the depth test can drop them where
 early tests don't apply.
 **Revisit if:** ft_vox (own meshes, consistent winding → enable culling).
+
+## 2026-11-14 — `.obj` parser in the engine, `v` + `f` only, fan triangulation
+**Chose:** `engine::parse_obj(text) -> Result<ObjModel, ObjError>` reading `v` and `f`
+(any corner count, `a/b/c` tokens, negative indices), fan-triangulating faces, and
+computing the bounding box; every other line skipped. Errors carry the line number.
+Colours are chosen by scop, not the parser.
+**Rejected:** reading `.mtl` materials (the subject asks for greys); a parser in scop
+(ft_newton / ft_vox will load `.obj` too); ear-clipping now (needed only for concave
+faces — the § 17 bonus).
+**Why:** smallest parser that loads every mandatory file and fails cleanly on bad ones.
+**Cost accepted:** concave faces may draw stray triangles until § 17; `vt`/`vn` ignored
+until needed.
+**Revisit if:** § 17 (concave faces), § 18 (file texture coordinates).
