@@ -15,8 +15,8 @@ use crate::gpu::GpuError;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vertex {
-    /// x, y in NDC for now (−1..+1, y down). Becomes 3D in § 9.
-    pub position: [f32; 2],
+    /// x, y, z in the model's own space (§ 10: corners are 3D now).
+    pub position: [f32; 3],
     /// Linear RGB, 0.0–1.0.
     pub colour: [f32; 3],
 }
@@ -37,7 +37,7 @@ impl Vertex {
             vk::VertexInputAttributeDescription {
                 location: 0,
                 binding: 0,
-                format: vk::Format::R32G32_SFLOAT, // vec2
+                format: vk::Format::R32G32B32_SFLOAT, // vec3
                 offset: offset_of!(Vertex, position) as u32,
             },
             vk::VertexInputAttributeDescription {
@@ -99,10 +99,10 @@ mod tests {
 
     #[test]
     fn vertex_layout_matches_the_description() {
-        // 2 floats + 3 floats, no padding: 20 bytes, colour starts at byte 8.
-        assert_eq!(Vertex::binding().stride, 20);
+        // 3 floats + 3 floats, no padding: 24 bytes, colour starts at byte 12.
+        assert_eq!(Vertex::binding().stride, 24);
         let [position, colour] = Vertex::attributes();
         assert_eq!(position.offset, 0);
-        assert_eq!(colour.offset, 8);
+        assert_eq!(colour.offset, 12);
     }
 }

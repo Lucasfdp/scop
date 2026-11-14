@@ -6,8 +6,10 @@
 
 use ash::{Device, khr, vk};
 
+use crate::depth::DepthImage;
 use crate::gpu::GpuError;
 use crate::mesh::Mesh;
+use crate::shader_inputs::MAT4_SIZE;
 use crate::swapchain::COLOUR_RANGE;
 
 /// How many frames the CPU may work ahead of the GPU.
@@ -62,6 +64,11 @@ impl Frames {
         &self.slots[self.current]
     }
 
+    /// Which slot this frame uses (0 or 1): per-slot resources elsewhere use the same number.
+    pub(crate) fn index(&self) -> usize {
+        self.current
+    }
+
     /// Moves on to the next slot: 0, 1, 0, 1…
     pub(crate) fn advance(&mut self) {
         self.current = (self.current + 1) % self.slots.len();
@@ -114,21 +121,40 @@ fn create_slot(device: &Device, pool: vk::CommandPool) -> Result<Slot, GpuError>
 }
 
 /// Everything one frame draws with. Handles only, borrowed from their owners.
-pub(crate) struct FrameTarget {
+pub(crate) struct FrameTarget<'a> {
     pub(crate) image: vk::Image,
     pub(crate) view: vk::ImageView,
     pub(crate) extent: vk::Extent2D,
+    /// The depth buffer (§ 11): one image, shared by every frame.
+    pub(crate) depth: &'a DepthImage,
 }
 
-/// Records one frame: make the image drawable, clear it to `colour`, draw each
-/// (pipeline, mesh) pair in order with dynamic rendering, then make it presentable.
+/// One draw, resolved from the app's tickets: real objects plus the model matrix
+/// as the 64 bytes the push constant carries.
+pub(crate) struct Draw<'a> {
+    pub(crate) pipeline: vk::Pipeline,
+    pub(crate) mesh: &'a Mesh,
+    pub(crate) model: [u8; MAT4_SIZE],
+}
+
+/// Everything a frame's commands need besides the target image.
+pub(crate) struct DrawList<'a> {
+    pub(crate) clear_colour: [f32; 4],
+    /// The shared pipeline layout (`ShaderInputs`, § 10).
+    pub(crate) layout: vk::PipelineLayout,
+    /// This slot's descriptor set: points the shader at this slot's camera buffer.
+    pub(crate) camera_set: vk::DescriptorSet,
+    pub(crate) draws: Vec<Draw<'a>>,
+}
+
+/// Records one frame: make the image drawable, clear it, bind the camera, draw each
+/// mesh with its own model matrix (dynamic rendering), then make it presentable.
 pub(crate) fn record_frame(
     device: &Device,
     rendering: &khr::dynamic_rendering::Device,
     command_buffer: vk::CommandBuffer,
     target: &FrameTarget,
-    draws: &[(vk::Pipeline, &Mesh)],
-    colour: [f32; 4],
+    list: &DrawList,
 ) -> Result<(), GpuError> {
     let to_drawable = vk::ImageMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::empty())
@@ -139,6 +165,21 @@ pub(crate) fn record_frame(
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .image(target.image)
         .subresource_range(COLOUR_RANGE);
+    // § 11: the depth image, ready for depth testing. Old layout UNDEFINED: it's
+    // cleared below anyway. Waits for the *previous* frame's depth writes (same
+    // image, frames in flight) before this frame's depth tests read or write it.
+    let depth_ready = vk::ImageMemoryBarrier::default()
+        .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+        .dst_access_mask(
+            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+        )
+        .old_layout(vk::ImageLayout::UNDEFINED)
+        .new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(target.depth.image)
+        .subresource_range(target.depth.range());
     let to_present = vk::ImageMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
         .dst_access_mask(vk::AccessFlags::empty())
@@ -160,12 +201,28 @@ pub(crate) fn record_frame(
         .load_op(vk::AttachmentLoadOp::CLEAR)
         .store_op(vk::AttachmentStoreOp::STORE)
         .clear_value(vk::ClearValue {
-            color: vk::ClearColorValue { float32: colour },
+            color: vk::ClearColorValue {
+                float32: list.clear_colour,
+            },
         })];
+    // § 11: start every pixel at 1.0 (far plane), so the first fragment anywhere wins;
+    // throw the numbers away afterwards (DONT_CARE): nothing reads them after the frame.
+    let depth_attachment = vk::RenderingAttachmentInfo::default()
+        .image_view(target.depth.view)
+        .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .load_op(vk::AttachmentLoadOp::CLEAR)
+        .store_op(vk::AttachmentStoreOp::DONT_CARE)
+        .clear_value(vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: 1.0,
+                stencil: 0,
+            },
+        });
     let rendering_info = vk::RenderingInfo::default()
         .render_area(whole_image)
         .layer_count(1)
-        .color_attachments(&colour_attachments);
+        .color_attachments(&colour_attachments)
+        .depth_attachment(&depth_attachment);
     let viewport = vk::Viewport {
         x: 0.0,
         y: 0.0,
@@ -192,12 +249,45 @@ pub(crate) fn record_frame(
             &[],
             &[to_drawable],
         );
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::LATE_FRAGMENT_TESTS, // where last frame's depth writes end
+            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS, // where this frame's begin
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[depth_ready],
+        );
         rendering.cmd_begin_rendering(command_buffer, &rendering_info);
         // Dynamic state, set once: it stays set across the pipeline binds below.
         device.cmd_set_viewport(command_buffer, 0, &[viewport]);
         device.cmd_set_scissor(command_buffer, 0, &[whole_image]);
-        for &(pipeline, mesh) in draws {
-            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
+        // The noticeboard: set slot 0 = this slot's camera. Bound once — every pipeline
+        // shares the layout, so it stays bound across the pipeline switches below.
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            list.layout,
+            0,                  // first set slot
+            &[list.camera_set], // the sets, from slot 0 on
+            &[],                // no dynamic offsets
+        );
+        for draw in &list.draws {
+            let mesh = draw.mesh;
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                draw.pipeline,
+            );
+            // The sticky note: this draw's model matrix, bytes 0..64, vertex stage.
+            device.cmd_push_constants(
+                command_buffer,
+                list.layout,
+                vk::ShaderStageFlags::VERTEX,
+                0,
+                &draw.model,
+            );
             // Corners from binding 0, triangles from the index buffer (32-bit indices).
             device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices.handle], &[0]);
             device.cmd_bind_index_buffer(

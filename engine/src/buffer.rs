@@ -61,6 +61,20 @@ impl Buffer {
         }
     }
 
+    /// Maps the whole buffer and returns a CPU pointer to its first byte.
+    /// Never unmapped: freeing the memory (in `destroy`) unmaps it (§ 10:
+    /// *persistently mapped*).
+    ///
+    /// # Safety
+    /// The buffer's memory must be `HOST_VISIBLE`; call at most once per buffer.
+    pub(crate) unsafe fn map(&self, device: &Device) -> Result<*mut u8, GpuError> {
+        // SAFETY: the caller guarantees HOST_VISIBLE memory, mapped only once.
+        let ptr = unsafe {
+            device.map_memory(self.memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())?
+        };
+        Ok(ptr.cast::<u8>())
+    }
+
     /// Destroys the buffer, then frees its memory.
     ///
     /// # Safety
@@ -75,7 +89,7 @@ impl Buffer {
 
 /// Index of the first memory type this buffer may use (bit set in `allowed`)
 /// that has every flag in `wanted`.
-fn find_memory_type(
+pub(crate) fn find_memory_type(
     memory_types: &vk::PhysicalDeviceMemoryProperties,
     allowed: u32,
     wanted: vk::MemoryPropertyFlags,

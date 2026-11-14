@@ -5,6 +5,7 @@
 
 mod app;
 mod buffer;
+mod depth;
 mod frames;
 mod gpu;
 mod input;
@@ -12,6 +13,7 @@ mod maths;
 mod mesh;
 mod pipeline;
 mod platform;
+mod shader_inputs;
 mod spirv;
 mod swapchain;
 

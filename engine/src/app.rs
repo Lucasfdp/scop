@@ -4,6 +4,7 @@
 
 use crate::gpu::GpuContext;
 use crate::input::Input;
+use crate::maths::Mat4;
 use crate::mesh::MeshData;
 use crate::pipeline::Shaders;
 use crate::platform::RunError;
@@ -71,6 +72,8 @@ pub struct GpuInfo {
     pub queue_family: u32,
     pub swapchain_format: String,
     pub present_mode: String,
+    /// The depth buffer's format (§ 11), e.g. `D32_SFLOAT`.
+    pub depth_format: String,
     /// Swapchain size in physical pixels.
     pub extent: (u32, u32),
     pub image_count: usize,
@@ -79,15 +82,32 @@ pub struct GpuInfo {
 /// The draw list for one frame: what the app asks the engine to draw.
 pub struct Frame {
     pub(crate) clear_colour: [f32; 4],
-    pub(crate) draws: Vec<(PipelineId, MeshId)>,
+    pub(crate) aspect: f32,
+    pub(crate) camera: Mat4,
+    pub(crate) draws: Vec<(PipelineId, MeshId, Mat4)>,
 }
 
 impl Frame {
-    pub(crate) fn new() -> Self {
+    /// `aspect` = width ÷ height of the image this frame will be drawn into.
+    pub(crate) fn new(aspect: f32) -> Self {
         Frame {
             clear_colour: [0.0, 0.0, 0.0, 1.0],
+            aspect,
+            camera: Mat4::IDENTITY,
             draws: Vec::new(),
         }
+    }
+
+    /// Width ÷ height of this frame's image, for `Mat4::perspective`. Read it
+    /// every frame, never store it: it changes when the window is resized (Q-10.5).
+    pub fn aspect(&self) -> f32 {
+        self.aspect
+    }
+
+    /// The camera for every draw this frame: `projection * view`. Default: identity
+    /// (corners are used as-is, in Vulkan's −1..+1 screen box).
+    pub fn set_camera(&mut self, view_proj: Mat4) {
+        self.camera = view_proj;
     }
 
     /// Background colour (linear RGBA, 0.0–1.0). Default: black.
@@ -95,8 +115,27 @@ impl Frame {
         self.clear_colour = colour;
     }
 
-    /// Draw `mesh` with `pipeline`. Draws happen in the order they're requested.
-    pub fn draw(&mut self, pipeline: PipelineId, mesh: MeshId) {
-        self.draws.push((pipeline, mesh));
+    /// Draw `mesh` with `pipeline`, placed in the world by `model`.
+    /// Draws happen in the order they're requested.
+    pub fn draw(&mut self, pipeline: PipelineId, mesh: MeshId, model: Mat4) {
+        self.draws.push((pipeline, mesh, model));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_keeps_camera_and_each_draws_model() {
+        let mut frame = Frame::new(2.0);
+        assert_eq!(frame.aspect(), 2.0);
+        assert_eq!(frame.camera, Mat4::IDENTITY); // default when the app sets none
+        let spin = Mat4::rotation_y(1.0);
+        frame.set_camera(spin);
+        frame.draw(PipelineId(0), MeshId(0), Mat4::IDENTITY);
+        frame.draw(PipelineId(0), MeshId(1), spin);
+        assert_eq!(frame.camera, spin);
+        assert_eq!(frame.draws[1], (PipelineId(0), MeshId(1), spin));
     }
 }

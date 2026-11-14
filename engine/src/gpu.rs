@@ -2,7 +2,9 @@
 //! logical device and swapchain.
 //!
 //! Creation order: loader → instance → debug messenger → surface → physical device
-//! (chosen) → logical device → queue (fetched) → swapchain → image views → frame slots.
+//! (chosen) → logical device → queue (fetched) → swapchain → image views → frame slots
+//! → shader inputs (§ 10: layouts, descriptor pool, per-slot camera buffers)
+//! → depth image (§ 11).
 //! Pipelines and meshes are added later, by the app, through `Gfx` (§ 8).
 //! `Drop` waits for the GPU to go idle, then destroys in the mirror order.
 
@@ -14,9 +16,11 @@ use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 
 use crate::app::{Frame, GpuInfo, MeshId, PipelineId};
 use crate::buffer::Uploader;
-use crate::frames::{self, FrameTarget, Frames};
+use crate::depth::DepthImage;
+use crate::frames::{self, Draw, DrawList, FRAMES_IN_FLIGHT, FrameTarget, Frames};
 use crate::mesh::{Mesh, MeshData};
 use crate::pipeline::{Pipeline, Shaders};
+use crate::shader_inputs::{ShaderInputs, mat4_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
 
@@ -102,6 +106,8 @@ pub(crate) struct GpuContext {
     rendering_loader: khr::dynamic_rendering::Device,
     memory_types: vk::PhysicalDeviceMemoryProperties,
     frames: Frames,
+    inputs: ShaderInputs,
+    depth: DepthImage,
     // Owned here, handed out to the app as `PipelineId(i)` / `MeshId(i)` (§ 8).
     pipelines: Vec<Pipeline>,
     meshes: Vec<Mesh>,
@@ -189,8 +195,7 @@ impl GpuContext {
 
         let (physical_device, queue_family_index) =
             pick_physical_device(&instance, &surface_loader, surface).map_err(fail)?;
-        let device =
-            create_device(&instance, physical_device, queue_family_index).map_err(fail)?;
+        let device = create_device(&instance, physical_device, queue_family_index).map_err(fail)?;
 
         // SAFETY: family `queue_family_index` was requested with 1 queue, so index 0 exists.
         let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
@@ -227,6 +232,36 @@ impl GpuContext {
         let memory_types =
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
 
+        // § 10: the shared pipeline layout and one camera buffer per frame slot.
+        let inputs = ShaderInputs::new(&device, &memory_types, FRAMES_IN_FLIGHT).map_err(|e| {
+            // SAFETY: ShaderInputs cleaned up after itself; nothing has been submitted yet.
+            unsafe {
+                frames.destroy(&device);
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
+
+        // § 11: the depth buffer, the same size as the swapchain images.
+        let depth = DepthImage::new(
+            &instance,
+            physical_device,
+            &device,
+            &memory_types,
+            swapchain.extent,
+        )
+        .map_err(|e| {
+            // SAFETY: DepthImage cleaned up after itself; nothing has been submitted yet.
+            unsafe {
+                inputs.destroy(&device);
+                frames.destroy(&device);
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
+
         Ok(GpuContext {
             _entry: entry,
             instance,
@@ -242,6 +277,8 @@ impl GpuContext {
             rendering_loader,
             memory_types,
             frames,
+            inputs,
+            depth,
             pipelines: Vec::new(),
             meshes: Vec::new(),
         })
@@ -249,7 +286,13 @@ impl GpuContext {
 
     /// Builds a pipeline for the swapchain's format and returns its ticket.
     pub(crate) fn create_pipeline(&mut self, shaders: Shaders) -> Result<PipelineId, GpuError> {
-        let pipeline = Pipeline::new(&self.device, self.swapchain.format.format, shaders)?;
+        let pipeline = Pipeline::new(
+            &self.device,
+            self.inputs.pipeline_layout,
+            self.swapchain.format.format,
+            self.depth.format,
+            shaders,
+        )?;
         self.pipelines.push(pipeline);
         Ok(PipelineId(self.pipelines.len() - 1))
     }
@@ -267,16 +310,36 @@ impl GpuContext {
         Ok(MeshId(self.meshes.len() - 1))
     }
 
+    /// Width ÷ height of the swapchain images, i.e. of what the next frame draws into.
+    pub(crate) fn aspect(&self) -> f32 {
+        let vk::Extent2D { width, height } = self.swapchain.extent;
+        if height == 0 {
+            return 1.0; // minimised: nothing is drawn anyway, avoid dividing by zero
+        }
+        width as f32 / height as f32
+    }
+
     /// Draws one frame from the app's draw list: clears the next swapchain image,
     /// draws each requested mesh, and shows it. The § 5 loop, in order:
-    /// wait fence → acquire → reset fence → record → submit → present.
+    /// wait fence → write camera → acquire → reset fence → record → submit → present.
     pub(crate) fn draw_frame(&mut self, frame: &Frame) -> Result<FrameStatus, GpuError> {
+        let slot_index = self.frames.index();
+
         // Turn tickets into the real objects before touching the GPU, so a bad
         // ticket fails cleanly instead of half-way through a frame.
-        let mut draws = Vec::with_capacity(frame.draws.len());
-        for &(pipeline, mesh) in &frame.draws {
+        let mut list = DrawList {
+            clear_colour: frame.clear_colour,
+            layout: self.inputs.pipeline_layout,
+            camera_set: self.inputs.camera_set(slot_index),
+            draws: Vec::with_capacity(frame.draws.len()),
+        };
+        for &(pipeline, mesh, model) in &frame.draws {
             match (self.pipelines.get(pipeline.0), self.meshes.get(mesh.0)) {
-                (Some(p), Some(m)) => draws.push((p.handle, m)),
+                (Some(p), Some(m)) => list.draws.push(Draw {
+                    pipeline: p.handle,
+                    mesh: m,
+                    model: mat4_bytes(model),
+                }),
                 _ => return Err(GpuError::UnknownHandle),
             }
         }
@@ -288,6 +351,10 @@ impl GpuContext {
         unsafe {
             // 1. Wait until the GPU has finished the work last submitted from this slot.
             self.device.wait_for_fences(&[slot.fence], true, u64::MAX)?;
+
+            // 1b. Only now is this slot's camera buffer free: the GPU has finished the
+            //     last frame that read it (Q-10.2). Write this frame's camera.
+            self.inputs.write_camera(slot_index, frame.camera);
 
             // 2. Which image do we draw into? `image_free` is raised once it's off screen.
             let acquired = self.swapchain_loader.acquire_next_image(
@@ -306,6 +373,7 @@ impl GpuContext {
                 image: self.swapchain.images[image_index as usize],
                 view: self.swapchain.views[image_index as usize],
                 extent: self.swapchain.extent,
+                depth: &self.depth,
             };
             let render_done = self.swapchain.render_done[image_index as usize];
 
@@ -318,8 +386,7 @@ impl GpuContext {
                 &self.rendering_loader,
                 slot.command_buffer,
                 &target,
-                &draws,
-                frame.clear_colour,
+                &list,
             )?;
 
             // 5. Hand it over: wait for `image_free` before the first write to the
@@ -374,6 +441,7 @@ impl GpuContext {
             queue_family: self.queue_family_index,
             swapchain_format: format!("{:?}", self.swapchain.format.format),
             present_mode: format!("{:?}", self.swapchain.present_mode),
+            depth_format: format!("{:?}", self.depth.format),
             extent: (self.swapchain.extent.width, self.swapchain.extent.height),
             image_count: self.swapchain.images.len(),
         }
@@ -402,6 +470,9 @@ impl Drop for GpuContext {
             for pipeline in &self.pipelines {
                 pipeline.destroy(&self.device);
             }
+            // After the pipelines: they were built with its layout.
+            self.inputs.destroy(&self.device);
+            self.depth.destroy(&self.device);
             self.frames.destroy(&self.device);
             self.swapchain.destroy(&self.device, &self.swapchain_loader);
             self.device.destroy_device(None);

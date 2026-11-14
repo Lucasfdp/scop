@@ -10,6 +10,10 @@ use crate::spirv;
 
 const ENTRY_POINT: &CStr = c"main";
 
+/// § 11: a fragment survives if its depth is LESS than what's stored (smaller = nearer).
+/// Checkpoint experiment: try `GREATER` and only the background is left (Q-11.3).
+const DEPTH_COMPARE: vk::CompareOp = vk::CompareOp::LESS;
+
 /// Compiled shaders the app hands to the engine (SPIR-V bytes, e.g. from `include_bytes!`).
 #[derive(Clone, Copy)]
 pub struct Shaders {
@@ -17,16 +21,20 @@ pub struct Shaders {
     pub fragment: &'static [u8],
 }
 
+/// A pipeline. Its layout is the engine-wide one from `ShaderInputs` (§ 10),
+/// shared and destroyed there, not owned here.
 pub(crate) struct Pipeline {
-    pub(crate) layout: vk::PipelineLayout,
     pub(crate) handle: vk::Pipeline,
 }
 
 impl Pipeline {
-    /// Builds a pipeline that draws triangles into images of `colour_format`.
+    /// Builds a pipeline that draws triangles into images of `colour_format`, with a
+    /// depth image of `depth_format`, reading the extra inputs described by `layout`.
     pub(crate) fn new(
         device: &Device,
+        layout: vk::PipelineLayout,
         colour_format: vk::Format,
+        depth_format: vk::Format,
         shaders: Shaders,
     ) -> Result<Self, GpuError> {
         let vertex_words = spirv::words_from_bytes(shaders.vertex)?;
@@ -35,9 +43,6 @@ impl Pipeline {
         // SAFETY: plain creation on a live device; every object made here is
         // destroyed below on failure, or owned by the returned Pipeline.
         unsafe {
-            let layout =
-                device.create_pipeline_layout(&vk::PipelineLayoutCreateInfo::default(), None)?;
-
             let modules =
                 create_module(device, &vertex_words).and_then(|vertex| {
                     match create_module(device, &fragment_words) {
@@ -48,27 +53,16 @@ impl Pipeline {
                         }
                     }
                 });
-            let (vertex, fragment) = match modules {
-                Ok(m) => m,
-                Err(e) => {
-                    device.destroy_pipeline_layout(layout, None);
-                    return Err(e);
-                }
-            };
+            let (vertex, fragment) = modules?;
 
-            let result = create_pipeline(device, layout, colour_format, vertex, fragment);
+            let formats = (colour_format, depth_format);
+            let result = create_pipeline(device, layout, formats, vertex, fragment);
 
             // The pipeline keeps its own compiled copy; the modules can go now.
             device.destroy_shader_module(vertex, None);
             device.destroy_shader_module(fragment, None);
 
-            match result {
-                Ok(handle) => Ok(Pipeline { layout, handle }),
-                Err(e) => {
-                    device.destroy_pipeline_layout(layout, None);
-                    Err(e)
-                }
-            }
+            Ok(Pipeline { handle: result? })
         }
     }
 
@@ -76,10 +70,7 @@ impl Pipeline {
     /// Call exactly once, after the GPU has finished all work using this pipeline,
     /// before the device is destroyed.
     pub(crate) unsafe fn destroy(&self, device: &Device) {
-        unsafe {
-            device.destroy_pipeline(self.handle, None);
-            device.destroy_pipeline_layout(self.layout, None);
-        }
+        unsafe { device.destroy_pipeline(self.handle, None) };
     }
 }
 
@@ -93,7 +84,7 @@ fn create_module(device: &Device, words: &[u32]) -> Result<vk::ShaderModule, Gpu
 fn create_pipeline(
     device: &Device,
     layout: vk::PipelineLayout,
-    colour_format: vk::Format,
+    (colour_format, depth_format): (vk::Format, vk::Format),
     vertex: vk::ShaderModule,
     fragment: vk::ShaderModule,
 ) -> Result<vk::Pipeline, GpuError> {
@@ -140,13 +131,21 @@ fn create_pipeline(
     let colour_blend =
         vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
 
+    // § 11: test every fragment against the depth buffer, and remember the winners.
+    let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+        .depth_test_enable(true)
+        .depth_write_enable(true)
+        .depth_compare_op(DEPTH_COMPARE);
+
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dynamic = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
     // Dynamic rendering's replacement for a render pass: just the formats drawn into.
+    // The depth format must match the depth image attached while drawing.
     let colour_formats = [colour_format];
-    let mut rendering =
-        vk::PipelineRenderingCreateInfo::default().color_attachment_formats(&colour_formats);
+    let mut rendering = vk::PipelineRenderingCreateInfo::default()
+        .color_attachment_formats(&colour_formats)
+        .depth_attachment_format(depth_format);
 
     let info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&stages)
@@ -155,6 +154,7 @@ fn create_pipeline(
         .viewport_state(&viewport)
         .rasterization_state(&rasterisation)
         .multisample_state(&multisample)
+        .depth_stencil_state(&depth_stencil)
         .color_blend_state(&colour_blend)
         .dynamic_state(&dynamic)
         .layout(layout)

@@ -2,7 +2,7 @@
 section: 10
 slug: uniforms-and-descriptors
 tier: T2
-status: in-progress
+status: done
 prereqs: [8, 9]
 terms: [uniform, per-frame vs per-draw data, push constant, push constant range, stage flags, pipeline layout, uniform buffer, persistently mapped, descriptor, descriptor set layout, descriptor pool, descriptor set, set and binding numbers, descriptor write, binding a descriptor set, std140, view-projection matrix]
 ---
@@ -328,7 +328,9 @@ writes it and walks you through it.
 
 **Verify:**
 - `cargo run -p scop`: the cube spins smoothly; far edges look smaller than near ones.
-- Resize the window: still not stretched.
+- Resize the window: `aspect` now follows the swapchain size every frame, but the
+  swapchain itself is only rebuilt in § 16 — until then a resized window may look
+  stretched or skip frames. That's expected here.
 - Validation layer silent, including at exit (Esc).
 - Some faces overlapping wrongly at certain angles: expected, see § 11.
 - `cargo test` and `cargo clippy --all-targets` clean.

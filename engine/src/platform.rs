@@ -131,12 +131,13 @@ impl<A: App> Runner<A> {
             return;
         }
 
-        let mut frame = Frame::new();
-        self.app.draw(&mut frame);
-
         let Some(graphics) = &mut self.graphics else {
             return;
         };
+        // The aspect of the image this frame will be drawn into, fresh every frame.
+        let mut frame = Frame::new(graphics.gpu.aspect());
+        self.app.draw(&mut frame);
+
         match graphics.gpu.draw_frame(&frame) {
             // OutOfDate/Suboptimal: the swapchain no longer matches the window.
             // Rebuilding it is § 16; until then frames may be skipped after a resize.

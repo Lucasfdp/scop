@@ -345,3 +345,29 @@ a different texture.
 **A-10.5** The cube looks **stretched sideways** (twice as wide as it should be), because
 the projection still uses the old width ÷ height. It should come from the **current
 swapchain image size every frame** (`frame.aspect()`), so it's always right after a resize.
+
+## Section 11
+
+**A-11.1** One **depth value** per pixel: how far away (0 = near plane, 1 = far plane) the
+thing currently drawn in that pixel is. It's reset to **1.0** — the far plane, "as far
+as possible" — so that the first fragment drawn anywhere is always nearer (`LESS`) and
+wins against the empty background.
+
+**A-11.2** The buffer never changes from its cleared 1.0, so **every** fragment passes
+the test (everything is less than 1.0) — exactly as if there were no depth buffer:
+the last triangle drawn wins, and back faces show through again at some angles. The
+test needs remembered depths to compare against; without writes there are none.
+
+**A-11.3** **Only the background.** Every depth is between 0 and 1, and nothing is
+*greater* than the cleared 1.0, so every fragment fails and is discarded.
+
+**A-11.4** The depth numbers are only needed **during** the frame, to decide which
+fragment wins each pixel. Once rendering ends, nothing reads them — the next frame
+clears them to 1.0 anyway. The colour image is different: it's shown on screen, so it
+must be kept (`STORE`). `DONT_CARE` lets the GPU skip writing the depth numbers back to
+memory, which saves bandwidth.
+
+**A-11.5** **Z-fighting.** Depth precision is crowded near the near plane; with a tiny
+`near`, surfaces farther away get almost the same depth numbers, so rounding picks the
+winner pixel by pixel: flickering stripes. It shows first **where two faces are close
+together and far from the camera** (edges where faces meet, the far side of the model).

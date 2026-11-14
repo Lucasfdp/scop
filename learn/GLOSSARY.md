@@ -927,3 +927,105 @@ only read what it declares. Pipelines sharing a layout keep bound sets across `c
 ### view-projection matrix
 **Plain:** `projection × view` combined once per frame on the CPU, so the shader multiplies by fewer matrices.
 **Introduced in:** § 10
+
+---
+
+## Sync cheat sheet — fence vs semaphore vs barrier
+
+Same idea ("wait until that's done"), different **waiter**. Ask *who waits for whom?*
+
+| Name | Who waits | For what | scop example |
+|---|---|---|---|
+| **Fence** | the **CPU** | the GPU to finish a submit | wait before reusing a frame slot (§ 5); wait before destroying the staging buffer (§ 7) |
+| **Semaphore** | the **GPU** | another GPU operation (between submits / present) | don't draw until the image is free (`image_free`); don't show it until drawing is done (`render_done`) (§ 5) |
+| **Barrier** | **later commands** in the *same* command buffer | earlier commands in it | copy finished → vertex reads may start (§ 7); image layout changes (§ 5) |
+
+- **Fence:** a gate the CPU can't pass until the GPU opens it.
+- **Semaphore:** a railway signal between GPU jobs. Only semaphores have a *wait stage*.
+- **Barrier:** a line inside one to-do list that later steps can't cross until earlier ones are done.
+
+## Section 11 — What's in front of what
+
+### occlusion
+**Plain:** one thing hiding another. Correct occlusion = near things cover far things.
+**Introduced in:** § 11
+
+### painter's algorithm
+**Plain:** drawing far-to-near so near things paint over far ones.
+**Precise:** needs re-sorting every time things move, and fails for intersecting triangles. Not used in scop.
+**Introduced in:** § 11
+
+### depth test
+**Plain:** per pixel: "is this new fragment nearer than what's already there?" If not, it's thrown away.
+**Introduced in:** § 11
+
+### depth buffer
+**Plain:** one number per pixel — the depth of whatever is currently drawn there. Also: z-buffer.
+**Introduced in:** § 11
+
+### depth value
+**Plain:** the stored number: `z / w` after the perspective divide; 0 = near plane, 1 = far plane.
+**Introduced in:** § 11
+
+### compare op
+**Plain:** the rule for "nearer". scop: `LESS` (smaller depth wins).
+**Precise:** `VkCompareOp`, "comparison operation", set in the pipeline's depth/stencil state.
+**Introduced in:** § 11
+
+### depth write
+**Plain:** after a fragment passes, store its depth. A separate switch from the test.
+**Introduced in:** § 11
+
+### depth clear value
+**Plain:** what every pixel's depth is reset to each frame: 1.0, the far plane.
+**Introduced in:** § 11
+
+### depth image
+**Plain:** the depth buffer as a Vulkan object — swapchain-sized `VkImage` in `DEVICE_LOCAL` memory, plus a view.
+**Introduced in:** § 11
+
+### depth format
+**Plain:** how each depth number is stored. scop prefers `D32_SFLOAT` — **D**epth, **32** bits, **S**igned **FLOAT**.
+**Introduced in:** § 11
+
+### format features
+**Plain:** what a GPU can do with a format.
+**Precise:** `get_physical_device_format_properties`; a depth format needs `DEPTH_STENCIL_ATTACHMENT` in its optimal-tiling features.
+**Introduced in:** § 11
+
+### image aspect
+**Plain:** which part of an image a view or barrier talks about: `COLOR` or `DEPTH`.
+**Introduced in:** § 11
+
+### depth attachment
+**Plain:** the depth image plugged into rendering — with dynamic rendering, `RenderingInfo::depth_attachment`.
+**Introduced in:** § 11
+
+### depth layout
+**Plain:** the layout a depth image must be in while used for depth testing.
+**Precise:** `DEPTH_STENCIL_ATTACHMENT_OPTIMAL`, reached with one barrier per frame.
+**Introduced in:** § 11
+
+### store op DONT_CARE
+**Plain:** "don't care": after rendering, the GPU may throw these contents away. Right for depth — nobody reads it after the frame.
+**Introduced in:** § 11
+
+### early and late fragment tests
+**Plain:** the pipeline stages where depth testing happens — before the fragment shader (early, fast) or after it (late).
+**Introduced in:** § 11
+
+### stencil
+**Plain:** an optional second per-pixel number for masking effects (outlines, mirrors). Unused in scop; it's why layouts say `DEPTH_STENCIL`.
+**Introduced in:** § 11
+
+### z-fighting
+**Plain:** two surfaces at almost the same depth flicker in stripes because rounding picks the winner. Worse with a tiny near plane.
+**Introduced in:** § 11
+
+### back-face culling
+**Plain:** skipping triangles that face away from the camera. A speed-up, not a replacement for the depth buffer. Off in scop.
+**Introduced in:** § 11
+
+### winding order
+**Plain:** whether a triangle's corners go round clockwise or counter-clockwise on screen; culling uses it to tell front from back.
+**Introduced in:** § 11

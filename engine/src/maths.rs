@@ -161,6 +161,12 @@ impl Mat4 {
         self.cols[col][row]
     }
 
+    /// The 16 numbers in memory order: column by column, like GLSL's `mat4`
+    /// (and std140, § 10). This is what gets copied to the GPU.
+    pub const fn to_cols_array(self) -> [[f32; 4]; 4] {
+        self.cols
+    }
+
     /// The "do nothing" card: every number copied straight across.
     pub const IDENTITY: Mat4 = Mat4::from_rows([
         [1.0, 0.0, 0.0, 0.0],
@@ -474,6 +480,12 @@ mod tests {
     }
 
     // --- Memory layout (Q-9.5) ---
+
+    #[test]
+    fn to_cols_array_gives_memory_order() {
+        let t = Mat4::translation(Vec3::new(5.0, 6.0, 7.0));
+        assert_eq!(t.to_cols_array()[3], [5.0, 6.0, 7.0, 1.0]);
+    }
 
     #[test]
     fn storage_is_column_major() {

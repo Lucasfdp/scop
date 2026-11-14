@@ -137,3 +137,18 @@ space and postpones descriptors to § 14's harder case); both in uniform buffers
 descriptors are learned on the simplest resource first; the pattern carries to ft_vox.
 **Cost accepted:** more Vulkan objects (set layout, pool, sets, two buffers) to create and destroy.
 **Revisit if:** per-draw data grows past ~64 bytes (move it to a buffer with dynamic offsets).
+
+## 2026-11-14 — One depth image with a per-frame barrier; back-face culling off
+**Chose:** a single swapchain-sized `D32_SFLOAT` depth image (first supported of
+`D32_SFLOAT`, `D32_SFLOAT_S8_UINT`, `D24_UNORM_S8_UINT`), moved to
+`DEPTH_STENCIL_ATTACHMENT_OPTIMAL` by a barrier each frame that waits for the previous
+frame's depth writes; cleared to 1.0, store `DONT_CARE`, compare `LESS`.
+Back-face culling stays off.
+**Rejected:** one depth image per frame slot (no inter-frame barrier, but twice the
+memory and more to rebuild on resize); culling on (faster, but `.obj` files don't
+guarantee consistent winding — a mixed-winding model would lose faces).
+**Why:** the standard setup; correct for any model the evaluator loads.
+**Cost accepted:** frames in flight serialise on the depth image (negligible on one
+queue); hidden back faces are still shaded before the depth test can drop them where
+early tests don't apply.
+**Revisit if:** ft_vox (own meshes, consistent winding → enable culling).
