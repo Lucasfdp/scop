@@ -394,3 +394,29 @@ fine for the mandatory files; handling concave faces properly is the § 17 bonus
 **A-12.5** `model = rotation_y(angle) × translation(−centre)` — right to left: move the
 centre onto the origin, then turn. The centre is the middle of the **bounding box**:
 `(min + max) / 2` of all the corners, computed by the parser.
+
+## Section 13
+
+**A-13.1** The greys **bleed into each other**: a shared corner can only hold one colour,
+so every face touching it gets that colour at that corner, and the rasteriser blends
+between corners. You'd see smooth grey gradients across the logo instead of distinct flat
+faces, with no visible edges. (Which grey each corner ends up with depends on which face
+wrote it last.)
+
+**A-13.2** **18,960** vertices (6,320 triangles × 3 corners each). The indices are simply
+`0, 1, 2, 3, …, 18959`: every vertex is used exactly once.
+
+**A-13.3** Arrows are **continuous**: movement should happen every frame the key is down,
+so `held`. Space is a **toggle**: one press = one switch, so `pressed` (true only on the
+frame the key goes down). With `held`, the spin would flip on/off every frame while the
+key is down — a random-looking on/off depending on how many frames you held it.
+
+**A-13.4** Read right to left: centre → **move** → turn. The turn now happens *after* the
+move, so the position itself gets turned: `rotation_y(90°)` turns +x into −z. Holding →
+increases position.x, which comes out as moving **away from the camera** (the model gets
+smaller) instead of right — and changing the angle swings the model around the origin.
+The translation card must be leftmost for screen-axis (world-space) movement.
+
+**A-13.5** **`dt`**: per second, so the same speed at any frame rate. **`radius`**: in the
+model's own size, so a tiny logo and a big teapot both move at a sensible pace.
+**`0.2`**: the chosen speed — a fifth of the model's size per second.

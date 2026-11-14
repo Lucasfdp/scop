@@ -165,3 +165,18 @@ faces — the § 17 bonus).
 **Cost accepted:** concave faces may draw stray triangles until § 17; `vt`/`vn` ignored
 until needed.
 **Revisit if:** § 17 (concave faces), § 18 (file texture coordinates).
+
+## 2026-11-14 — One grey per `.obj` face via duplicated corners; keyboard controls
+**Chose:** the parser records each triangle's source face (`ObjModel::triangle_faces`);
+scop gives every triangle its own three corners, coloured `0.25 + 0.5 × fract(face ×
+0.618…)`. Controls: arrows / + − move (screen axes, × radius × dt), I K / J L / U O turn
+around x / y / z, Space toggles the automatic spin, R resets. Model matrix:
+`translation(position) × rotation_y × rotation_x × rotation_z × translation(−centre)`.
+**Rejected:** grey per triangle (quads show a diagonal seam); `gl_PrimitiveID` in the
+fragment shader (needs the geometry-shader feature, unsupported on MoltenVK); quaternions
+(more than a viewer needs).
+**Why:** flat, distinct, subtle faces as the subject asks; every control maps to one
+card of the § 9 recipe.
+**Cost accepted:** 3× the vertices (18,960 for the teapot — negligible); gimbal lock at
+some Euler angle combinations.
+**Revisit if:** lighting arrives (normals also need duplicated corners — same layout).

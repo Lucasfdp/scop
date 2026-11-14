@@ -1091,3 +1091,53 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### parse error with line number
 **Plain:** a broken file gives `file:17: reason` and a clean failure exit — never a panic.
 **Introduced in:** § 12
+
+## Section 13 — Grey faces and moving the model
+
+### flat colour per face
+**Plain:** every pixel of a face the same colour — all three corners of a triangle get the same colour, so there's nothing to blend.
+**Introduced in:** § 13
+
+### shared corners
+**Plain:** each position stored once and reused by every triangle touching it (via indices). Compact, but one value per corner.
+**Introduced in:** § 13
+
+### duplicated corners
+**Plain:** each triangle gets its own three corners, so each corner can carry a value for one face only (a grey now; normals and seams later).
+**Introduced in:** § 13
+
+### face of a triangle
+**Plain:** which `.obj` face line a triangle came from; a quad's two triangles share it. `ObjModel::triangle_faces`.
+**Introduced in:** § 13
+
+### spread-out greys
+**Plain:** `0.25 + 0.5 × fract(i × 0.618…)` — steps around the grey range so consecutive faces always differ, staying subtle (0.25..0.75).
+**Introduced in:** § 13
+
+### held vs pressed
+**Plain:** `held` = every frame the key is down (movement); `pressed` = only the frame it goes down (toggles).
+**Introduced in:** § 13
+
+### per-second speed
+**Plain:** speeds in units per second, multiplied by `dt`, so they're the same at any frame rate.
+**Introduced in:** § 13
+
+### model state
+**Plain:** position (x, y, z) and turn angles — changed by keys in `update`, turned into a matrix in `draw`.
+**Introduced in:** § 13
+
+### model matrix recipe
+**Plain:** `translation(position) × rotation × translation(−centre)` — centre it, turn it, move it (read right to left).
+**Introduced in:** § 13
+
+### world-space movement
+**Plain:** moving along the screen's axes whatever way the model is turned — the translation card goes leftmost.
+**Introduced in:** § 13
+
+### Euler angles
+**Plain:** a turn described as three angles, one per axis, applied in a fixed order. After Leonhard Euler.
+**Introduced in:** § 13
+
+### gimbal lock
+**Plain:** at some angles two Euler axes line up, so two keys turn the model the same way. Harmless here; quaternions avoid it.
+**Introduced in:** § 13
