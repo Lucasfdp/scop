@@ -447,3 +447,27 @@ for **fragment shader reads**.
 detail in dark shades). `UNORM` tells the GPU they're plain brightness, so it skips the
 decoding; the sRGB swapchain then encodes them a *second* time on output. Double-encoded
 = everything brighter and paler than the picture really is.
+
+## Section 15
+
+**A-15.1** `t = 0` → **`a`**; `t = 0.5` → **halfway between** `a` and `b`; `t = 1` → **`b`**.
+In scop: `a` = the face's grey, `b` = the picture's colour at that spot, `t` = the blend
+factor (eased progress of the fade).
+
+**A-15.2** So the fade can **move gradually** and **reverse without a jump**. The key only
+says which way to go; each frame the blend factor takes a small `dt`-sized step towards
+that target. Setting it directly would snap the picture in or out — the abrupt cut the
+subject forbids.
+
+**A-15.3** Progress stops climbing at 0.4 and starts heading back down from **0.4** — no
+jump — reaching 0 (all grey) about 0.4 × 0.6 s ≈ 0.24 s later, then staying there. The
+picture fades out smoothly from where it was.
+
+**A-15.4** A **validation error when the pipeline is created**: the fragment shader uses
+push-constant bytes that no range declares for the `FRAGMENT` stage. (If you ran anyway,
+the blend value the fragment shader reads would be undefined.)
+
+**A-15.5** The **pace** differs. Linear moves at a constant speed, so it starts and stops
+with a sudden "kick". smoothstep starts slowly, speeds up in the middle, and slows down
+again at the end, so you see the difference at the **very beginning and very end** of the
+fade — it eases in and out instead of starting and stopping abruptly.

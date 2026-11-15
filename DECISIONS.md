@@ -196,3 +196,14 @@ another directory).
 **Cost accepted:** stretched streaks on faces parallel to the projection (the § 18 bonus);
 no mipmaps (shimmer when far away).
 **Revisit if:** § 18 (stretch-free mapping); ft_vox (texture atlases, mipmaps).
+
+## 2026-11-15 — Smooth texture toggle: target + dt stepping, smoothstep, blend in the push constant
+**Chose:** T flips a target (0 grey / 1 picture); every frame the raw progress moves
+towards it by `dt / 0.6 s`, clamped; scop eases it with smoothstep and sends it as a
+`float` after the model matrix in the push constant (one range, `VERTEX | FRAGMENT`,
+68 bytes); the fragment shader does `mix(grey, picture, blend)`.
+**Rejected:** a timer restarted on each press (jumps when pressed mid-fade); the blend in
+the camera uniform buffer (it's per draw, not per frame); a linear fade (abrupt start/stop).
+**Why:** reversible at any moment, frame-rate independent, no abrupt cuts.
+**Cost accepted:** the push block grows to 68 of the guaranteed 128 bytes.
+**Revisit if:** more per-draw data appears (move it to a buffer with dynamic offsets).

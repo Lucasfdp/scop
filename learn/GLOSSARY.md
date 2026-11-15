@@ -1227,3 +1227,37 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### mipmaps
 **Plain:** pre-shrunk copies of a texture for far-away surfaces, to stop shimmering. Skipped in scop.
 **Introduced in:** § 14
+
+## Section 15 — Fading colour into texture
+
+### blend factor
+**Plain:** the 0..1 number saying how much of the second colour to use — here, how much picture vs grey.
+**Introduced in:** § 15
+
+### linear interpolation
+**Plain:** `a + (b − a) × t`, the point a fraction `t` of the way from `a` to `b`. "Lerp"; GLSL `mix(a, b, t)`.
+**Introduced in:** § 15
+
+### target value
+**Plain:** where the blend factor is heading (0 or 1). The key flips the target, not the value.
+**Introduced in:** § 15
+
+### transition duration
+**Plain:** how long a full fade takes (0.6 s); each frame the value moves `dt / duration`, clamped.
+**Introduced in:** § 15
+
+### easing
+**Plain:** reshaping 0..1 progress so motion starts and ends gently instead of abruptly.
+**Introduced in:** § 15
+
+### smoothstep
+**Plain:** the classic easing curve `t² × (3 − 2t)` — zero slope at both ends, so no "kick".
+**Introduced in:** § 15
+
+### reversible transition
+**Plain:** one that can change direction at any moment without a jump — free when you move a value towards a target.
+**Introduced in:** § 15
+
+### push constant range for two stages
+**Plain:** one range visible to the vertex **and** fragment shaders: model (64 bytes) + blend (4 bytes) = 68.
+**Introduced in:** § 15
