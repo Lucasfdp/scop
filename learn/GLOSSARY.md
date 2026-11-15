@@ -1141,3 +1141,89 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### gimbal lock
 **Plain:** at some angles two Euler axes line up, so two keys turn the model the same way. Harmless here; quaternions avoid it.
 **Introduced in:** § 13
+
+## Section 14 — Images on surfaces
+
+### texture
+**Plain:** a picture used to colour surfaces. Vulkan: image + view + sampler, reached through a descriptor.
+**Introduced in:** § 14
+
+### texel
+**Plain:** one coloured square of a texture — **tex**ture **el**ement (pixel stays "on screen").
+**Introduced in:** § 14
+
+### texture coordinates
+**Plain:** a corner's position on the picture: U across, V down, both 0..1. "UVs".
+**Introduced in:** § 14
+
+### planar mapping
+**Plain:** making up UVs by projecting the picture straight through the model along one axis.
+**Introduced in:** § 14
+
+### stretching
+**Plain:** faces parallel to the projection get one thin strip of the picture smeared across them. § 18 bonus.
+**Introduced in:** § 14
+
+### TGA
+**Plain:** **T**ruevision **G**raphics **A**dapter ("Targa"): 18-byte header + pixels. Simple to load by hand.
+**Introduced in:** § 14
+
+### image header
+**Plain:** the fixed bytes at a file's start describing the rest: type, width, height, bits per pixel, origin flag.
+**Introduced in:** § 14
+
+### BGR order
+**Plain:** TGA stores pixels as blue, green, red (alpha) — the loader swaps them to RGBA.
+**Introduced in:** § 14
+
+### image origin
+**Plain:** whether the first stored row is the bottom (TGA default) or the top (descriptor bit 5). Ignored = upside down.
+**Introduced in:** § 14
+
+### run-length encoding
+**Plain:** "next N pixels are this colour" stored once. TGA type 10.
+**Introduced in:** § 14
+
+### sRGB
+**Plain:** how image files store brightness (more detail in darks). Textures must be created `…_SRGB` so the GPU decodes it; wrong = washed out or too dark.
+**Introduced in:** § 14
+
+### texture image
+**Plain:** a `VkImage` with usage `TRANSFER_DST | SAMPLED`, `DEVICE_LOCAL`, `OPTIMAL` tiling.
+**Introduced in:** § 14
+
+### layout transition for upload
+**Plain:** `UNDEFINED → TRANSFER_DST_OPTIMAL` before the copy, `→ SHADER_READ_ONLY_OPTIMAL` after it.
+**Introduced in:** § 14
+
+### copy buffer to image
+**Plain:** `cmd_copy_buffer_to_image`: staging bytes into the image's texels.
+**Introduced in:** § 14
+
+### sampler
+**Plain:** `VkSampler`: the rules for reading a texture (filtering, edges). Separate from the image.
+**Introduced in:** § 14
+
+### filtering
+**Plain:** between texels: `NEAREST` (closest, blocky) or `LINEAR` (blend neighbours, smooth).
+**Introduced in:** § 14
+
+### address mode
+**Plain:** for UVs outside 0..1: `REPEAT` (tile) or `CLAMP_TO_EDGE` (stretch the edge).
+**Introduced in:** § 14
+
+### combined image sampler
+**Plain:** one descriptor pointing at an image view and a sampler together. GLSL `sampler2D`.
+**Introduced in:** § 14
+
+### descriptor set per texture
+**Plain:** each texture gets its own set (set 1), written once; a draw binds the one it wants.
+**Introduced in:** § 14
+
+### default white texture
+**Plain:** a 1×1 white texture always bound when a draw asks for none — multiplying by white changes nothing.
+**Introduced in:** § 14
+
+### mipmaps
+**Plain:** pre-shrunk copies of a texture for far-away surfaces, to stop shimmering. Skipped in scop.
+**Introduced in:** § 14

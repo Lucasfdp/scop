@@ -134,6 +134,8 @@ pub(crate) struct FrameTarget<'a> {
 pub(crate) struct Draw<'a> {
     pub(crate) pipeline: vk::Pipeline,
     pub(crate) mesh: &'a Mesh,
+    /// Set 1: the picture this draw reads (§ 14).
+    pub(crate) texture_set: vk::DescriptorSet,
     pub(crate) model: [u8; MAT4_SIZE],
 }
 
@@ -279,6 +281,15 @@ pub(crate) fn record_frame(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 draw.pipeline,
+            );
+            // Set slot 1 = this draw's texture (the camera in slot 0 stays bound).
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                list.layout,
+                1,
+                &[draw.texture_set],
+                &[],
             );
             // The sticky note: this draw's model matrix, bytes 0..64, vertex stage.
             device.cmd_push_constants(

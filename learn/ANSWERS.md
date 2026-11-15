@@ -420,3 +420,30 @@ The translation card must be leftmost for screen-axis (world-space) movement.
 **A-13.5** **`dt`**: per second, so the same speed at any frame rate. **`radius`**: in the
 model's own size, so a tiny logo and a big teapot both move at a sensible pace.
 **`0.2`**: the chosen speed — a fifth of the model's size per second.
+
+## Section 14
+
+**A-14.1** Two numbers per corner saying **where on the picture** that corner sits: **U**
+across (0 = left edge, 1 = right edge) and **V** down (0 = top, 1 = bottom). The GPU blends
+them across each triangle so every pixel knows its spot, then looks the colour up there.
+scop **makes them up** with planar mapping: project along the bounding box's thinnest axis
+and scale the other two coordinates into 0..1.
+
+**A-14.2** **Long streaks** of the picture's edge colours. Along a thin side face, the
+projected axis (x) changes but U and V barely do — every point on that face maps to
+almost the same thin strip of the picture, so those few texels get smeared across the
+whole face. That's the "visible stretching" the § 18 bonus asks you to remove.
+
+**A-14.3** The picture is **upside down** (mirrored top to bottom): the loader treats the
+first stored row — the picture's bottom — as the top.
+
+**A-14.4** Written by the CPU **once**, read by the GPU every frame → staging into
+`DEVICE_LOCAL` (fastest reads), same as the meshes. `UNDEFINED → TRANSFER_DST_OPTIMAL`:
+make the image ready to **be written by the copy**. `TRANSFER_DST_OPTIMAL →
+SHADER_READ_ONLY_OPTIMAL`: after the copy, make it ready (and the copy's writes visible)
+for **fragment shader reads**.
+
+**A-14.5** **Washed out / too pale.** The file's bytes are already sRGB-encoded (extra
+detail in dark shades). `UNORM` tells the GPU they're plain brightness, so it skips the
+decoding; the sRGB swapchain then encodes them a *second* time on output. Double-encoded
+= everything brighter and paler than the picture really is.

@@ -180,3 +180,19 @@ card of the § 9 recipe.
 **Cost accepted:** 3× the vertices (18,960 for the teapot — negligible); gimbal lock at
 some Euler angle combinations.
 **Revisit if:** lighting arrives (normals also need duplicated corners — same layout).
+
+## 2026-11-15 — Textures: own TGA loader, set 1 per texture, planar UVs, embedded default
+**Chose:** `engine::load_tga` (types 2 and 10, 24/32-bit, both origins) → RGBA;
+`R8G8B8A8_SRGB` `DEVICE_LOCAL` image via staging with two layout transitions; one shared
+`LINEAR`/`REPEAT` sampler; each texture its own descriptor set (set 1, combined image
+sampler, fragment stage); a 1×1 white default texture; UVs made by scop by planar
+projection along the bounding box's thinnest axis; the texture embedded with
+`include_bytes!`.
+**Rejected:** PNG (needs a hand-written decompressor), BMP (padding + header versions),
+PPM (few tools export it); texture in set 0 (different update rate from the camera);
+reading `vt` (the subject's files have none); a run-time path (breaks when run from
+another directory).
+**Why:** smallest loader real tools feed; descriptors split by update rate (§ 10's rule).
+**Cost accepted:** stretched streaks on faces parallel to the projection (the § 18 bonus);
+no mipmaps (shimmer when far away).
+**Revisit if:** § 18 (stretch-free mapping); ft_vox (texture atlases, mipmaps).

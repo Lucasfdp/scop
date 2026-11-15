@@ -8,6 +8,7 @@ use crate::maths::Mat4;
 use crate::mesh::MeshData;
 use crate::pipeline::Shaders;
 use crate::platform::RunError;
+use crate::tga::Image;
 
 /// What an app implements. The engine owns the loop and calls these
 /// (inversion of control): `setup` once, then `update` and `draw` every frame.
@@ -41,6 +42,11 @@ pub struct PipelineId(pub(crate) usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeshId(pub(crate) usize);
 
+/// Ticket for a texture the engine keeps (§ 14). `TextureId(0)` is the built-in
+/// 1×1 white texture, used by `Frame::draw`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextureId(pub(crate) usize);
+
 /// The app's access to the GPU during `setup`.
 pub struct Gfx<'a> {
     pub(crate) gpu: &'a mut GpuContext,
@@ -55,6 +61,11 @@ impl Gfx<'_> {
     /// Uploads a mesh to GPU memory (through a staging buffer, § 7).
     pub fn create_mesh(&mut self, data: &MeshData) -> Result<MeshId, RunError> {
         Ok(self.gpu.create_mesh(data)?)
+    }
+
+    /// Uploads a picture (e.g. from `load_tga`) as a texture.
+    pub fn create_texture(&mut self, image: &Image) -> Result<TextureId, RunError> {
+        Ok(TextureId(self.gpu.create_texture(image)?))
     }
 
     /// Facts about the GPU and swapchain, for printing.
@@ -84,7 +95,7 @@ pub struct Frame {
     pub(crate) clear_colour: [f32; 4],
     pub(crate) aspect: f32,
     pub(crate) camera: Mat4,
-    pub(crate) draws: Vec<(PipelineId, MeshId, Mat4)>,
+    pub(crate) draws: Vec<(PipelineId, MeshId, TextureId, Mat4)>,
 }
 
 impl Frame {
@@ -115,10 +126,21 @@ impl Frame {
         self.clear_colour = colour;
     }
 
-    /// Draw `mesh` with `pipeline`, placed in the world by `model`.
-    /// Draws happen in the order they're requested.
+    /// Draw `mesh` with `pipeline`, placed in the world by `model`, with the built-in
+    /// white texture. Draws happen in the order they're requested.
     pub fn draw(&mut self, pipeline: PipelineId, mesh: MeshId, model: Mat4) {
-        self.draws.push((pipeline, mesh, model));
+        self.draw_textured(pipeline, mesh, TextureId(0), model);
+    }
+
+    /// Like `draw`, reading `texture` in the fragment shader (§ 14).
+    pub fn draw_textured(
+        &mut self,
+        pipeline: PipelineId,
+        mesh: MeshId,
+        texture: TextureId,
+        model: Mat4,
+    ) {
+        self.draws.push((pipeline, mesh, texture, model));
     }
 }
 
@@ -136,6 +158,9 @@ mod tests {
         frame.draw(PipelineId(0), MeshId(0), Mat4::IDENTITY);
         frame.draw(PipelineId(0), MeshId(1), spin);
         assert_eq!(frame.camera, spin);
-        assert_eq!(frame.draws[1], (PipelineId(0), MeshId(1), spin));
+        assert_eq!(
+            frame.draws[1],
+            (PipelineId(0), MeshId(1), TextureId(0), spin)
+        );
     }
 }

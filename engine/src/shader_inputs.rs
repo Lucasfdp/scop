@@ -43,6 +43,9 @@ pub(crate) struct ShaderInputs {
     /// The shared "function signature" for every pipeline's extra inputs.
     pub(crate) pipeline_layout: vk::PipelineLayout,
     set_layout: vk::DescriptorSetLayout,
+    /// Set 1's shape (§ 14): binding 0 = one combined image sampler, fragment stage.
+    /// Owned here because the pipeline layout is built from it; textures use it.
+    pub(crate) texture_set_layout: vk::DescriptorSetLayout,
     pool: vk::DescriptorPool,
     cameras: Vec<CameraSlot>,
 }
@@ -61,6 +64,12 @@ impl ShaderInputs {
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::VERTEX)];
+        // Set 1 (§ 14): one picture + its sampler, read by the fragment shader.
+        let texture_bindings = [vk::DescriptorSetLayoutBinding::default()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT)];
         // The sticky note's size: one mat4, read by the vertex shader.
         let push_ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
@@ -78,7 +87,18 @@ impl ShaderInputs {
                 &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
                 None,
             )?;
-            let set_layouts = [set_layout];
+            let texture_set_layout = match device.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo::default().bindings(&texture_bindings),
+                None,
+            ) {
+                Ok(l) => l,
+                Err(e) => {
+                    device.destroy_descriptor_set_layout(set_layout, None);
+                    return Err(e.into());
+                }
+            };
+            // Set 0 = camera, set 1 = texture: the order here is the `set = N` in GLSL.
+            let set_layouts = [set_layout, texture_set_layout];
             let pipeline_layout = match device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
                     .set_layouts(&set_layouts)
@@ -87,6 +107,7 @@ impl ShaderInputs {
             ) {
                 Ok(l) => l,
                 Err(e) => {
+                    device.destroy_descriptor_set_layout(texture_set_layout, None);
                     device.destroy_descriptor_set_layout(set_layout, None);
                     return Err(e.into());
                 }
@@ -100,6 +121,7 @@ impl ShaderInputs {
                 Ok(p) => p,
                 Err(e) => {
                     device.destroy_pipeline_layout(pipeline_layout, None);
+                    device.destroy_descriptor_set_layout(texture_set_layout, None);
                     device.destroy_descriptor_set_layout(set_layout, None);
                     return Err(e.into());
                 }
@@ -108,6 +130,7 @@ impl ShaderInputs {
             let mut inputs = ShaderInputs {
                 pipeline_layout,
                 set_layout,
+                texture_set_layout,
                 pool,
                 cameras: Vec::with_capacity(slot_count),
             };
@@ -212,6 +235,7 @@ impl ShaderInputs {
             }
             device.destroy_descriptor_pool(self.pool, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_descriptor_set_layout(self.texture_set_layout, None);
             device.destroy_descriptor_set_layout(self.set_layout, None);
         }
     }

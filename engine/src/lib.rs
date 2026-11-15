@@ -17,15 +17,18 @@ mod platform;
 mod shader_inputs;
 mod spirv;
 mod swapchain;
+mod texture;
+mod tga;
 
 // The whole public API.
-pub use app::{App, Flow, Frame, Gfx, GpuInfo, MeshId, PipelineId};
+pub use app::{App, Flow, Frame, Gfx, GpuInfo, MeshId, PipelineId, TextureId};
 pub use input::{Input, Key};
 pub use maths::{Mat4, Vec3, Vec4};
 pub use mesh::{MeshData, Vertex};
 pub use obj::{ObjError, ObjErrorKind, ObjModel, parse_obj};
 pub use pipeline::Shaders;
 pub use platform::{RunError, WindowConfig, run};
+pub use tga::{Image, TgaError, load_tga};
 
 use std::fs;
 use std::io;

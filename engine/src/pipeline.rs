@@ -99,7 +99,7 @@ fn create_pipeline(
             .name(ENTRY_POINT),
     ];
 
-    // The packing list (§ 7): binding 0 holds `Vertex`es; locations 0 and 1 read from it.
+    // The packing list (§ 7): binding 0 holds `Vertex`es; locations 0–2 read from it.
     let bindings = [Vertex::binding()];
     let attributes = Vertex::attributes();
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()

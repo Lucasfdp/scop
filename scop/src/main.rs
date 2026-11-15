@@ -5,8 +5,8 @@ use std::env;
 use std::process::ExitCode;
 
 use engine::{
-    App, Flow, Frame, Gfx, GpuInfo, Input, Key, Mat4, MeshData, MeshId, ObjModel, PipelineId,
-    RunError, Shaders, Vec3, Vertex, WindowConfig,
+    App, Flow, Frame, Gfx, GpuInfo, Image, Input, Key, Mat4, MeshData, MeshId, ObjModel,
+    PipelineId, RunError, Shaders, TextureId, Vec3, Vertex, WindowConfig,
 };
 
 /// The mesh shaders, compiled by `build.rs` and embedded in the binary.
@@ -14,6 +14,10 @@ const MESH_SHADERS: Shaders = Shaders {
     vertex: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.vert.spv")),
     fragment: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.frag.spv")),
 };
+
+/// The cheerful picture (§ 14), embedded in the binary so scop works from any
+/// directory. Replace `resources/texture.tga` with your own and rebuild.
+const TEXTURE_TGA: &[u8] = include_bytes!("../../resources/texture.tga");
 
 /// Automatic spin around y, in radians per second (about one turn every 8 s).
 const SPIN_SPEED: f32 = 0.8;
@@ -78,8 +82,11 @@ struct Scop {
     /// Size of the model: camera distance and movement speed scale with it.
     radius: f32,
     placement: Placement,
+    /// The decoded picture, uploaded in `setup`.
+    picture: Image,
     pipeline: Option<PipelineId>,
     model: Option<MeshId>,
+    texture: Option<TextureId>,
 }
 
 impl App for Scop {
@@ -88,6 +95,7 @@ impl App for Scop {
         println!("{CONTROLS}");
         self.pipeline = Some(gfx.create_pipeline(MESH_SHADERS)?);
         self.model = Some(gfx.create_mesh(&self.mesh)?);
+        self.texture = Some(gfx.create_texture(&self.picture)?);
         Ok(())
     }
 
@@ -140,8 +148,10 @@ impl App for Scop {
 
         // The model's placement (the sticky note).
         let model = self.placement.matrix(self.centre);
-        if let (Some(pipeline), Some(mesh)) = (self.pipeline, self.model) {
-            frame.draw(pipeline, mesh, model);
+        if let (Some(pipeline), Some(mesh), Some(texture)) =
+            (self.pipeline, self.model, self.texture)
+        {
+            frame.draw_textured(pipeline, mesh, texture, model);
         }
     }
 }
@@ -183,6 +193,15 @@ fn main() -> ExitCode {
         obj.triangles.len()
     );
 
+    // Our own TGA loader (§ 14); a broken picture is reported like a broken model.
+    let picture = match engine::load_tga(TEXTURE_TGA) {
+        Ok(picture) => picture,
+        Err(err) => {
+            eprintln!("scop: resources/texture.tga: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let config = WindowConfig {
         title: String::from("scop"),
         width: 1280,
@@ -190,12 +209,14 @@ fn main() -> ExitCode {
     };
     let scop = Scop {
         mesh: grey_faces(&obj),
+        picture,
         centre: obj.centre(),
         // A model that's a single point would put the camera on top of it.
         radius: obj.radius().max(0.001),
         placement: Placement::START,
         pipeline: None,
         model: None,
+        texture: None,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -224,6 +245,7 @@ fn print_gpu_info(info: &GpuInfo) {
 /// The model with one flat grey per `.obj` face (§ 13): every triangle gets its own
 /// three corners (duplicated, not shared), all the colour of its face, so nothing
 /// blends across faces. Indices become 0, 1, 2, … — each corner used once.
+/// Each corner also gets its spot on the picture (§ 14, `planar_uv`).
 fn grey_faces(obj: &ObjModel) -> MeshData {
     let mut vertices = Vec::with_capacity(obj.triangles.len() * 3);
     for (triangle, &face) in obj.triangles.iter().zip(&obj.triangle_faces) {
@@ -233,11 +255,35 @@ fn grey_faces(obj: &ObjModel) -> MeshData {
             vertices.push(Vertex {
                 position: [p.x, p.y, p.z],
                 colour: [grey, grey, grey],
+                uv: planar_uv(p, obj.min, obj.max),
             });
         }
     }
     let indices = (0..vertices.len() as u32).collect();
     MeshData { vertices, indices }
+}
+
+/// Planar mapping (§ 14): shine the picture straight through the model along the
+/// bounding box's **thinnest** axis, and scale the other two axes into 0..1.
+/// `y` stays "up" on the picture whenever it's one of the two (v = 0 at the top).
+/// Faces parallel to the beam get streaks — the § 18 bonus fixes that.
+fn planar_uv(p: Vec3, min: Vec3, max: Vec3) -> [f32; 2] {
+    let size = max - min;
+    // 0..1 across the box; a flat side (size 0) gets the middle.
+    let frac = |v: f32, lo: f32, len: f32| if len > 0.0 { (v - lo) / len } else { 0.5 };
+    if size.x <= size.y && size.x <= size.z {
+        // Thin in x (the 42 logo): picture on the y-z plane, seen from +x.
+        [
+            1.0 - frac(p.z, min.z, size.z),
+            1.0 - frac(p.y, min.y, size.y),
+        ]
+    } else if size.z <= size.y {
+        // Thin in z: picture on the x-y plane, seen from +z (the camera's side).
+        [frac(p.x, min.x, size.x), 1.0 - frac(p.y, min.y, size.y)]
+    } else {
+        // Thin in y (a flat, lying model): picture on the x-z plane, seen from above.
+        [frac(p.x, min.x, size.x), frac(p.z, min.z, size.z)]
+    }
 }
 
 /// A subtle grey for face `index`: always in 0.25..0.75 (never black or white), and
@@ -277,6 +323,27 @@ mod tests {
             mesh.vertices
                 .iter()
                 .all(|v| v.colour == mesh.vertices[0].colour)
+        );
+    }
+
+    #[test]
+    fn planar_uvs_span_the_picture_with_y_up() {
+        // A box thin in z: corners map to the picture's corners, top of the box = v 0.
+        let (min, max) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 4.0, 0.1));
+        assert_eq!(planar_uv(Vec3::new(0.0, 4.0, 0.0), min, max), [0.0, 0.0]); // top-left
+        assert_eq!(planar_uv(Vec3::new(2.0, 0.0, 0.0), min, max), [1.0, 1.0]); // bottom-right
+        // Thin in x (like the logo): z runs across, y down; still top = v 0.
+        let (min, max) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.1, 4.0, 2.0));
+        assert_eq!(planar_uv(Vec3::new(0.0, 4.0, 2.0), min, max), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn embedded_texture_loads() {
+        let picture = engine::load_tga(TEXTURE_TGA).unwrap();
+        assert!(picture.width > 0 && picture.height > 0);
+        assert_eq!(
+            picture.rgba.len(),
+            (picture.width * picture.height * 4) as usize
         );
     }
 

@@ -185,12 +185,6 @@ impl Uploader<'_> {
 
     /// Records and submits a one-off copy, then waits for it on a fence.
     fn copy(&self, from: &Buffer, to: &Buffer, size: vk::DeviceSize) -> Result<(), GpuError> {
-        let alloc = vk::CommandBufferAllocateInfo::default()
-            .command_pool(self.pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        let begin = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         let region = vk::BufferCopy {
             src_offset: 0,
             dst_offset: 0,
@@ -200,6 +194,54 @@ impl Uploader<'_> {
         let written_for_drawing = vk::MemoryBarrier::default()
             .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
             .dst_access_mask(vk::AccessFlags::VERTEX_ATTRIBUTE_READ | vk::AccessFlags::INDEX_READ);
+        self.run_once(|device, command_buffer| {
+            // SAFETY: called while `command_buffer` is recording; both buffers are alive.
+            unsafe {
+                device.cmd_copy_buffer(command_buffer, from.handle, to.handle, &[region]);
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::VERTEX_INPUT,
+                    vk::DependencyFlags::empty(),
+                    &[written_for_drawing],
+                    &[],
+                    &[],
+                );
+            }
+        })
+    }
+
+    /// A new staging buffer (CPU-writable, `TRANSFER_SRC`) holding `bytes`.
+    /// The caller destroys it after the copy that reads it has finished.
+    pub(crate) fn staging_with(&self, bytes: &[u8]) -> Result<Buffer, GpuError> {
+        let size = bytes.len() as vk::DeviceSize;
+        let staging = Buffer::new(
+            self.device,
+            self.memory_types,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        if let Err(e) = self.fill(&staging, bytes, size) {
+            // SAFETY: never submitted, so not in use.
+            unsafe { staging.destroy(self.device) };
+            return Err(e);
+        }
+        Ok(staging)
+    }
+
+    /// One-off GPU work: allocates a command buffer, lets `record` fill it, submits
+    /// it, and **waits** on a fence until the GPU has finished (load time only).
+    pub(crate) fn run_once(
+        &self,
+        record: impl FnOnce(&Device, vk::CommandBuffer),
+    ) -> Result<(), GpuError> {
+        let alloc = vk::CommandBufferAllocateInfo::default()
+            .command_pool(self.pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        let begin = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         // SAFETY: the pool belongs to this queue's family; the command buffer and
         // fence are freed before returning, after the wait.
@@ -219,22 +261,12 @@ impl Uploader<'_> {
 
             let run = || -> Result<(), vk::Result> {
                 self.device.begin_command_buffer(command_buffer, &begin)?;
-                self.device
-                    .cmd_copy_buffer(command_buffer, from.handle, to.handle, &[region]);
-                self.device.cmd_pipeline_barrier(
-                    command_buffer,
-                    vk::PipelineStageFlags::TRANSFER,
-                    vk::PipelineStageFlags::VERTEX_INPUT,
-                    vk::DependencyFlags::empty(),
-                    &[written_for_drawing],
-                    &[],
-                    &[],
-                );
+                record(self.device, command_buffer);
                 self.device.end_command_buffer(command_buffer)?;
                 let command_buffers = [command_buffer];
                 let submit = vk::SubmitInfo::default().command_buffers(&command_buffers);
                 self.device.queue_submit(self.queue, &[submit], fence)?;
-                // The submit returned at once; the copy runs later. Wait for it.
+                // The submit returned at once; the work runs later. Wait for it.
                 self.device.wait_for_fences(&[fence], true, u64::MAX)
             };
             let result = run();

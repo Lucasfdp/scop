@@ -4,7 +4,7 @@
 //! Creation order: loader → instance → debug messenger → surface → physical device
 //! (chosen) → logical device → queue (fetched) → swapchain → image views → frame slots
 //! → shader inputs (§ 10: layouts, descriptor pool, per-slot camera buffers)
-//! → depth image (§ 11).
+//! → depth image (§ 11) → textures (§ 14: sampler, pool, white texture 0).
 //! Pipelines and meshes are added later, by the app, through `Gfx` (§ 8).
 //! `Drop` waits for the GPU to go idle, then destroys in the mirror order.
 
@@ -23,6 +23,8 @@ use crate::pipeline::{Pipeline, Shaders};
 use crate::shader_inputs::{ShaderInputs, mat4_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
+use crate::texture::Textures;
+use crate::tga::Image;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
@@ -56,7 +58,9 @@ impl fmt::Display for GpuError {
             GpuError::WindowHandle(e) => write!(f, "could not get the window's handles: {e}"),
             GpuError::Unsupported(what) => write!(f, "unsupported: {what}"),
             GpuError::Spirv(e) => write!(f, "bad shader: {e}"),
-            GpuError::UnknownHandle => write!(f, "draw request with an unknown pipeline or mesh"),
+            GpuError::UnknownHandle => {
+                write!(f, "draw request with an unknown pipeline, mesh or texture")
+            }
         }
     }
 }
@@ -108,6 +112,7 @@ pub(crate) struct GpuContext {
     frames: Frames,
     inputs: ShaderInputs,
     depth: DepthImage,
+    textures: Textures,
     // Owned here, handed out to the app as `PipelineId(i)` / `MeshId(i)` (§ 8).
     pipelines: Vec<Pipeline>,
     meshes: Vec<Mesh>,
@@ -262,6 +267,25 @@ impl GpuContext {
             fail(e)
         })?;
 
+        // § 14: the shared sampler, the texture pool, and texture 0 (1×1 white).
+        let uploader = Uploader {
+            device: &device,
+            memory_types: &memory_types,
+            pool: frames.pool(),
+            queue,
+        };
+        let textures = Textures::new(&uploader, inputs.texture_set_layout).map_err(|e| {
+            // SAFETY: Textures cleaned up after itself; its uploads were waited for.
+            unsafe {
+                depth.destroy(&device);
+                inputs.destroy(&device);
+                frames.destroy(&device);
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
+
         Ok(GpuContext {
             _entry: entry,
             instance,
@@ -279,6 +303,7 @@ impl GpuContext {
             frames,
             inputs,
             depth,
+            textures,
             pipelines: Vec::new(),
             meshes: Vec::new(),
         })
@@ -310,6 +335,18 @@ impl GpuContext {
         Ok(MeshId(self.meshes.len() - 1))
     }
 
+    /// Uploads a picture as a texture (§ 14). Returns its index for a `TextureId`.
+    pub(crate) fn create_texture(&mut self, image: &Image) -> Result<usize, GpuError> {
+        let uploader = Uploader {
+            device: &self.device,
+            memory_types: &self.memory_types,
+            pool: self.frames.pool(),
+            queue: self.queue,
+        };
+        self.textures
+            .add(&uploader, self.inputs.texture_set_layout, image)
+    }
+
     /// Width ÷ height of the swapchain images, i.e. of what the next frame draws into.
     pub(crate) fn aspect(&self) -> f32 {
         let vk::Extent2D { width, height } = self.swapchain.extent;
@@ -333,11 +370,16 @@ impl GpuContext {
             camera_set: self.inputs.camera_set(slot_index),
             draws: Vec::with_capacity(frame.draws.len()),
         };
-        for &(pipeline, mesh, model) in &frame.draws {
-            match (self.pipelines.get(pipeline.0), self.meshes.get(mesh.0)) {
-                (Some(p), Some(m)) => list.draws.push(Draw {
+        for &(pipeline, mesh, texture, model) in &frame.draws {
+            match (
+                self.pipelines.get(pipeline.0),
+                self.meshes.get(mesh.0),
+                self.textures.set(texture.0),
+            ) {
+                (Some(p), Some(m), Some(t)) => list.draws.push(Draw {
                     pipeline: p.handle,
                     mesh: m,
+                    texture_set: t,
                     model: mat4_bytes(model),
                 }),
                 _ => return Err(GpuError::UnknownHandle),
@@ -470,6 +512,8 @@ impl Drop for GpuContext {
             for pipeline in &self.pipelines {
                 pipeline.destroy(&self.device);
             }
+            // Before `inputs`: the texture sets were made with its set-1 layout.
+            self.textures.destroy(&self.device);
             // After the pipelines: they were built with its layout.
             self.inputs.destroy(&self.device);
             self.depth.destroy(&self.device);
