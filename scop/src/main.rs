@@ -15,23 +15,69 @@ const MESH_SHADERS: Shaders = Shaders {
     fragment: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.frag.spv")),
 };
 
-/// How fast the model turns, in radians per second (about one turn every 8 s).
+/// Automatic spin around y, in radians per second (about one turn every 8 s).
 const SPIN_SPEED: f32 = 0.8;
+/// Turning with the keys, in radians per second (about a quarter turn per second).
+const TURN_SPEED: f32 = 1.5;
+/// Moving with the keys, in model sizes (radii) per second (§ 13, Q-13.5).
+const MOVE_SPEED: f32 = 0.2;
 /// Vertical field of view of the camera.
 const FOV_Y_DEGREES: f32 = 60.0;
-/// Background colour (linear RGBA): dark grey, so every face colour shows.
+/// Background colour (linear RGBA): very dark, so the greys stand out.
 const BACKGROUND: [f32; 4] = [0.02, 0.02, 0.03, 1.0];
+
+const CONTROLS: &str = "\
+controls:
+  arrows      move left / right / up / down
+  W / S       move closer / further
+  I / K       turn around x (tilt)
+  J / L       turn around y (spin)
+  U / O       turn around z (roll)
+  Space       pause / resume the automatic spin
+  R           reset
+  Esc         quit";
+
+/// Where the model is and how it's turned (§ 13: *model state*). Keys change these
+/// numbers in `update`; `draw` builds the model matrix from them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Placement {
+    position: Vec3,
+    /// Turns around x, y, z, in radians (Euler angles).
+    angles: Vec3,
+    /// The automatic spin around y, in radians.
+    spin: f32,
+    spinning: bool,
+}
+
+impl Placement {
+    const START: Placement = Placement {
+        position: Vec3::ZERO,
+        angles: Vec3::ZERO,
+        spin: 0.0,
+        spinning: true,
+    };
+
+    /// The § 9 recipe, read right to left: centre it on the origin, roll (z), tilt (x),
+    /// spin (y), then move it. Moving is leftmost, so the arrows always follow the
+    /// screen's axes, whatever way the model is turned (Q-13.4).
+    fn matrix(&self, centre: Vec3) -> Mat4 {
+        Mat4::translation(self.position)
+            * Mat4::rotation_y(self.spin + self.angles.y)
+            * Mat4::rotation_x(self.angles.x)
+            * Mat4::rotation_z(self.angles.z)
+            * Mat4::translation(-centre)
+    }
+}
 
 /// scop's state. The ids are `None` until the engine calls `setup`.
 struct Scop {
     /// The model's vertices and triangles, ready to upload in `setup`.
     mesh: MeshData,
-    /// Middle of the model's bounding box: what it spins around (§ 12, Q-9.3).
+    /// Middle of the model's bounding box: what it turns around (§ 12, Q-9.3).
     centre: Vec3,
-    /// Size of the model: decides how far back the camera sits.
+    /// Size of the model: camera distance and movement speed scale with it.
     radius: f32,
-    /// How far the model has turned so far, in radians.
-    angle: f32,
+    placement: Placement,
     pipeline: Option<PipelineId>,
     model: Option<MeshId>,
 }
@@ -39,20 +85,42 @@ struct Scop {
 impl App for Scop {
     fn setup(&mut self, gfx: &mut Gfx<'_>) -> Result<(), RunError> {
         print_gpu_info(&gfx.info());
+        println!("{CONTROLS}");
         self.pipeline = Some(gfx.create_pipeline(MESH_SHADERS)?);
         self.model = Some(gfx.create_mesh(&self.mesh)?);
         Ok(())
     }
 
     fn update(&mut self, input: &Input, dt: f32) -> Flow {
-        // × dt: the same speed on a 30 fps machine and a 120 fps one.
-        self.angle += SPIN_SPEED * dt;
-        // Quitting is scop's decision now, not the engine's.
         if input.pressed(Key::Escape) {
-            Flow::Exit
-        } else {
-            Flow::Continue
+            return Flow::Exit;
         }
+        let p = &mut self.placement;
+
+        // Toggles: `pressed`, so one press = one switch (Q-13.3).
+        if input.pressed(Key::Space) {
+            p.spinning = !p.spinning;
+        }
+        if input.pressed(Key::R) {
+            *p = Placement::START;
+        }
+
+        // Continuous: `held`, × dt so the speed is per second at any frame rate.
+        let step = MOVE_SPEED * self.radius * dt;
+        p.position = p.position
+            + axis_input(
+                input,
+                (Key::Left, Key::Right),
+                (Key::Down, Key::Up),
+                (Key::S, Key::W),
+            ) * step;
+        p.angles = p.angles
+            + axis_input(input, (Key::K, Key::I), (Key::J, Key::L), (Key::O, Key::U))
+                * (TURN_SPEED * dt);
+        if p.spinning {
+            p.spin += SPIN_SPEED * dt;
+        }
+        Flow::Continue
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -62,20 +130,29 @@ impl App for Scop {
         let fov_y = FOV_Y_DEGREES.to_radians();
         let distance = self.radius / (fov_y / 2.0).sin();
         let near = self.radius * 0.01; // as large as possible, for depth precision (§ 11)
-        let far = distance + self.radius * 2.0; // the back of the model is never clipped
+        // Room for the model to be pushed back with − (it can go a few sizes away).
+        let far = distance + self.radius * 20.0;
 
         // Camera, once per frame (the noticeboard). Aspect is read fresh every frame.
         let projection = Mat4::perspective(fov_y, frame.aspect(), near, far);
         let view = Mat4::translation(Vec3::new(0.0, 0.0, -distance));
         frame.set_camera(projection * view);
 
-        // The model's placement (the sticky note). Right to left: move its centre
-        // onto the origin, then turn it there (Q-9.3 / Q-12.5).
-        let model = Mat4::rotation_y(self.angle) * Mat4::translation(-self.centre);
+        // The model's placement (the sticky note).
+        let model = self.placement.matrix(self.centre);
         if let (Some(pipeline), Some(mesh)) = (self.pipeline, self.model) {
             frame.draw(pipeline, mesh, model);
         }
     }
+}
+
+/// −1, 0 or +1 for each axis from a (negative key, positive key) pair per axis.
+/// Both keys held = they cancel out.
+fn axis_input(input: &Input, x: (Key, Key), y: (Key, Key), z: (Key, Key)) -> Vec3 {
+    let axis = |(minus, plus): (Key, Key)| -> f32 {
+        f32::from(u8::from(input.held(plus))) - f32::from(u8::from(input.held(minus)))
+    };
+    Vec3::new(axis(x), axis(y), axis(z))
 }
 
 fn main() -> ExitCode {
@@ -112,11 +189,11 @@ fn main() -> ExitCode {
         height: 720,
     };
     let scop = Scop {
-        mesh: mesh_from_obj(&obj),
+        mesh: grey_faces(&obj),
         centre: obj.centre(),
         // A model that's a single point would put the camera on top of it.
         radius: obj.radius().max(0.001),
-        angle: 0.0,
+        placement: Placement::START,
         pipeline: None,
         model: None,
     };
@@ -144,31 +221,72 @@ fn print_gpu_info(info: &GpuInfo) {
     println!("depth buffer: {}", info.depth_format);
 }
 
-/// The parsed model as GPU-ready mesh data. Colour per corner from its place in the
-/// bounding box (x → red, y → green, z → blue), like § 10's cube, so the shape is
-/// readable. § 13 replaces this with a grey per face.
-fn mesh_from_obj(obj: &ObjModel) -> MeshData {
-    let size = obj.max - obj.min;
-    // 0..1 inside the box; a flat side (size 0) gets the middle value.
-    let fraction = |value: f32, min: f32, size: f32| {
-        if size > 0.0 {
-            (value - min) / size
-        } else {
-            0.5
+/// The model with one flat grey per `.obj` face (§ 13): every triangle gets its own
+/// three corners (duplicated, not shared), all the colour of its face, so nothing
+/// blends across faces. Indices become 0, 1, 2, … — each corner used once.
+fn grey_faces(obj: &ObjModel) -> MeshData {
+    let mut vertices = Vec::with_capacity(obj.triangles.len() * 3);
+    for (triangle, &face) in obj.triangles.iter().zip(&obj.triangle_faces) {
+        let grey = face_grey(face);
+        for &corner in triangle {
+            let p = obj.positions[corner as usize];
+            vertices.push(Vertex {
+                position: [p.x, p.y, p.z],
+                colour: [grey, grey, grey],
+            });
         }
-    };
-    let vertices = obj
-        .positions
-        .iter()
-        .map(|p| Vertex {
-            position: [p.x, p.y, p.z],
-            colour: [
-                fraction(p.x, obj.min.x, size.x),
-                fraction(p.y, obj.min.y, size.y),
-                fraction(p.z, obj.min.z, size.z),
-            ],
-        })
-        .collect();
-    let indices = obj.triangles.iter().flatten().copied().collect();
+    }
+    let indices = (0..vertices.len() as u32).collect();
     MeshData { vertices, indices }
+}
+
+/// A subtle grey for face `index`: always in 0.25..0.75 (never black or white), and
+/// consecutive faces land far apart because 0.618… (the golden ratio's fraction)
+/// never lines up with whole steps.
+fn face_grey(index: u32) -> f32 {
+    let step = (index as f32 * 0.618_034).fract();
+    0.25 + 0.5 * step
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn greys_are_subtle_and_neighbours_differ() {
+        for i in 0..1000 {
+            let g = face_grey(i);
+            assert!((0.25..0.75).contains(&g), "face {i}: {g}");
+            assert!(
+                (g - face_grey(i + 1)).abs() > 0.05,
+                "faces {i} and {}",
+                i + 1
+            );
+        }
+    }
+
+    #[test]
+    fn every_triangle_gets_its_own_corners() {
+        let obj = engine::parse_obj("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n").unwrap();
+        let mesh = grey_faces(&obj);
+        // A quad → 2 triangles → 6 corners (not the 4 shared ones), indices 0..6.
+        assert_eq!(mesh.vertices.len(), 6);
+        assert_eq!(mesh.indices, vec![0, 1, 2, 3, 4, 5]);
+        // Same face → same grey on all six corners.
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.colour == mesh.vertices[0].colour)
+        );
+    }
+
+    #[test]
+    fn translation_is_applied_after_the_turn() {
+        // Q-13.4: turned 90° around y, then moved right → still right on screen.
+        let mut p = Placement::START;
+        p.angles.y = std::f32::consts::FRAC_PI_2;
+        p.position = Vec3::new(1.0, 0.0, 0.0);
+        let centre_moved_to = p.matrix(Vec3::ZERO) * engine::Vec4::point(Vec3::ZERO);
+        assert!((centre_moved_to.x - 1.0).abs() < 1e-5 && centre_moved_to.z.abs() < 1e-5);
+    }
 }

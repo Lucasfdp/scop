@@ -2,7 +2,7 @@
 section: 13
 slug: faces-and-controls
 tier: T1
-status: in-progress
+status: done
 prereqs: [12]
 terms: [flat colour per face, shared corners, duplicated corners, face of a triangle, spread-out greys, held vs pressed, per-second speed, model state, model matrix recipe, world-space movement, Euler angles, gimbal lock]
 ---
@@ -149,7 +149,7 @@ interpolation in between produces that same colour everywhere.
 
 ```
 held  ← → ↑ ↓      move left/right/up/down       (x, y)
-held  + −          move closer / further         (z)
+held  W S          move closer / further         (z)   (letters: + and − sit elsewhere on a Spanish keyboard)
 held  I K          turn around x   (tilt)
 held  J L          turn around y   (spin)
 held  U O          turn around z   (roll)

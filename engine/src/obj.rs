@@ -16,6 +16,9 @@ use crate::maths::Vec3;
 pub struct ObjModel {
     pub positions: Vec<Vec3>,
     pub triangles: Vec<[u32; 3]>,
+    /// For each triangle, which face line (counted from 0) it came from: a quad's two
+    /// triangles share one number, so they can share one colour (§ 13).
+    pub triangle_faces: Vec<u32>,
     /// Smallest x, y and z of any corner.
     pub min: Vec3,
     /// Largest x, y and z of any corner.
@@ -86,6 +89,8 @@ impl std::error::Error for ObjError {}
 pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
     let mut positions: Vec<Vec3> = Vec::new();
     let mut triangles: Vec<[u32; 3]> = Vec::new();
+    let mut triangle_faces: Vec<u32> = Vec::new();
+    let mut face_count: u32 = 0;
 
     // `lines()` also strips Windows "\r\n" endings. Editors count lines from 1.
     for (number, line) in text.lines().enumerate().map(|(i, l)| (i + 1, l)) {
@@ -106,7 +111,9 @@ pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
                 // Fan from the first corner: (c0, c1, c2), (c0, c2, c3), …
                 for pair in corners[1..].windows(2) {
                     triangles.push([corners[0], pair[0], pair[1]]);
+                    triangle_faces.push(face_count);
                 }
+                face_count += 1;
             }
             _ => {} // blank, comment, or a line type scop doesn't need
         }
@@ -122,6 +129,7 @@ pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
     Ok(ObjModel {
         positions,
         triangles,
+        triangle_faces,
         min,
         max,
     })
@@ -193,6 +201,14 @@ mod tests {
         // Q-12.2's pattern: f a b c d → (a b c), (a c d), then − 1.
         let model = parse_obj(&format!("{SQUARE}f 4 1 2 3\n")).unwrap();
         assert_eq!(model.triangles, vec![[3, 0, 1], [3, 1, 2]]);
+    }
+
+    #[test]
+    fn a_quads_two_triangles_share_one_face_number() {
+        let model = parse_obj(&format!("{SQUARE}f 1 2 3\nf 1 2 3 4\nf 2 3 4\n")).unwrap();
+        // face 0: one triangle; face 1: a quad → two triangles; face 2: one triangle.
+        assert_eq!(model.triangle_faces, vec![0, 1, 1, 2]);
+        assert_eq!(model.triangle_faces.len(), model.triangles.len());
     }
 
     #[test]

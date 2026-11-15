@@ -169,7 +169,7 @@ until needed.
 ## 2026-11-14 — One grey per `.obj` face via duplicated corners; keyboard controls
 **Chose:** the parser records each triangle's source face (`ObjModel::triangle_faces`);
 scop gives every triangle its own three corners, coloured `0.25 + 0.5 × fract(face ×
-0.618…)`. Controls: arrows / + − move (screen axes, × radius × dt), I K / J L / U O turn
+0.618…)`. Controls: arrows / W S move (screen axes, × radius × dt), I K / J L / U O turn
 around x / y / z, Space toggles the automatic spin, R resets. Model matrix:
 `translation(position) × rotation_y × rotation_x × rotation_z × translation(−centre)`.
 **Rejected:** grey per triangle (quads show a diagonal seam); `gl_PrimitiveID` in the
