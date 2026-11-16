@@ -90,12 +90,23 @@ pub struct GpuInfo {
     pub image_count: usize,
 }
 
+/// One requested draw, as the app described it (tickets + plain numbers).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DrawCall {
+    pub(crate) pipeline: PipelineId,
+    pub(crate) mesh: MeshId,
+    pub(crate) texture: TextureId,
+    pub(crate) model: Mat4,
+    /// 0 = vertex colours only, 1 = texture only, in between = a mix (§ 15).
+    pub(crate) blend: f32,
+}
+
 /// The draw list for one frame: what the app asks the engine to draw.
 pub struct Frame {
     pub(crate) clear_colour: [f32; 4],
     pub(crate) aspect: f32,
     pub(crate) camera: Mat4,
-    pub(crate) draws: Vec<(PipelineId, MeshId, TextureId, Mat4)>,
+    pub(crate) draws: Vec<DrawCall>,
 }
 
 impl Frame {
@@ -126,21 +137,29 @@ impl Frame {
         self.clear_colour = colour;
     }
 
-    /// Draw `mesh` with `pipeline`, placed in the world by `model`, with the built-in
-    /// white texture. Draws happen in the order they're requested.
+    /// Draw `mesh` with `pipeline`, placed in the world by `model`, in its vertex
+    /// colours (built-in white texture, blend 0). Draws happen in request order.
     pub fn draw(&mut self, pipeline: PipelineId, mesh: MeshId, model: Mat4) {
-        self.draw_textured(pipeline, mesh, TextureId(0), model);
+        self.draw_textured(pipeline, mesh, TextureId(0), model, 0.0);
     }
 
-    /// Like `draw`, reading `texture` in the fragment shader (§ 14).
+    /// Like `draw`, with `texture` mixed over the vertex colours by `blend`:
+    /// 0 = colours only, 1 = texture only (§ 14, § 15). `blend` is clamped to 0..1.
     pub fn draw_textured(
         &mut self,
         pipeline: PipelineId,
         mesh: MeshId,
         texture: TextureId,
         model: Mat4,
+        blend: f32,
     ) {
-        self.draws.push((pipeline, mesh, texture, model));
+        self.draws.push(DrawCall {
+            pipeline,
+            mesh,
+            texture,
+            model,
+            blend: blend.clamp(0.0, 1.0),
+        });
     }
 }
 
@@ -158,9 +177,11 @@ mod tests {
         frame.draw(PipelineId(0), MeshId(0), Mat4::IDENTITY);
         frame.draw(PipelineId(0), MeshId(1), spin);
         assert_eq!(frame.camera, spin);
-        assert_eq!(
-            frame.draws[1],
-            (PipelineId(0), MeshId(1), TextureId(0), spin)
-        );
+        assert_eq!(frame.draws[1].mesh, MeshId(1));
+        assert_eq!(frame.draws[1].texture, TextureId(0)); // plain draw = white texture
+        assert_eq!(frame.draws[1].model, spin);
+        assert_eq!(frame.draws[1].blend, 0.0); // plain draw = colours only
+        frame.draw_textured(PipelineId(0), MeshId(0), TextureId(1), spin, 7.0);
+        assert_eq!(frame.draws[2].blend, 1.0); // clamped
     }
 }

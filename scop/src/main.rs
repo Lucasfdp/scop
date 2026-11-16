@@ -25,6 +25,8 @@ const SPIN_SPEED: f32 = 0.8;
 const TURN_SPEED: f32 = 1.5;
 /// Moving with the keys, in model sizes (radii) per second (§ 13, Q-13.5).
 const MOVE_SPEED: f32 = 0.2;
+/// How long a full fade between grey and picture takes, in seconds (§ 15).
+const FADE_SECONDS: f32 = 0.6;
 /// Vertical field of view of the camera.
 const FOV_Y_DEGREES: f32 = 60.0;
 /// Background colour (linear RGBA): very dark, so the greys stand out.
@@ -37,6 +39,7 @@ controls:
   I / K       turn around x (tilt)
   J / L       turn around y (spin)
   U / O       turn around z (roll)
+  T           fade between grey faces and the picture
   Space       pause / resume the automatic spin
   R           reset
   Esc         quit";
@@ -73,6 +76,49 @@ impl Placement {
     }
 }
 
+/// The grey ↔ picture fade (§ 15): a dimmer, not a light switch. T flips where it's
+/// heading (`target`); every frame `progress` takes a small step towards it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Fade {
+    /// 0 = heading to grey, 1 = heading to the picture.
+    target: f32,
+    /// How far along it is, 0..1, moving at a constant speed (before easing).
+    progress: f32,
+}
+
+impl Fade {
+    const GREY: Fade = Fade {
+        target: 0.0,
+        progress: 0.0,
+    };
+
+    /// T: turn the dimmer the other way. Only the target changes; `progress`
+    /// carries on from where it is, so pressing mid-fade never jumps (Q-15.3).
+    fn toggle(&mut self) {
+        self.target = 1.0 - self.target;
+    }
+
+    /// One frame: move `progress` towards `target` by at most `dt / FADE_SECONDS`,
+    /// never past it (that's the clamp), so it arrives and stays.
+    fn step(&mut self, dt: f32) {
+        let max_step = dt / FADE_SECONDS;
+        let gap = self.target - self.progress;
+        self.progress += gap.clamp(-max_step, max_step);
+    }
+
+    /// What the shader gets: the progress, eased with smoothstep (slow–fast–slow).
+    fn blend(&self) -> f32 {
+        smoothstep(self.progress)
+    }
+}
+
+/// The classic easing curve `t² × (3 − 2t)`: 0 → 0, 0.5 → 0.5, 1 → 1, with zero
+/// speed at both ends, so the fade starts and stops without a kick (Q-15.5).
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// scop's state. The ids are `None` until the engine calls `setup`.
 struct Scop {
     /// The model's vertices and triangles, ready to upload in `setup`.
@@ -82,6 +128,7 @@ struct Scop {
     /// Size of the model: camera distance and movement speed scale with it.
     radius: f32,
     placement: Placement,
+    fade: Fade,
     /// The decoded picture, uploaded in `setup`.
     picture: Image,
     pipeline: Option<PipelineId>,
@@ -112,6 +159,11 @@ impl App for Scop {
         if input.pressed(Key::R) {
             *p = Placement::START;
         }
+
+        if input.pressed(Key::T) {
+            self.fade.toggle();
+        }
+        self.fade.step(dt);
 
         // Continuous: `held`, × dt so the speed is per second at any frame rate.
         let step = MOVE_SPEED * self.radius * dt;
@@ -151,7 +203,7 @@ impl App for Scop {
         if let (Some(pipeline), Some(mesh), Some(texture)) =
             (self.pipeline, self.model, self.texture)
         {
-            frame.draw_textured(pipeline, mesh, texture, model);
+            frame.draw_textured(pipeline, mesh, texture, model, self.fade.blend());
         }
     }
 }
@@ -214,6 +266,7 @@ fn main() -> ExitCode {
         // A model that's a single point would put the camera on top of it.
         radius: obj.radius().max(0.001),
         placement: Placement::START,
+        fade: Fade::GREY,
         pipeline: None,
         model: None,
         texture: None,
@@ -345,6 +398,38 @@ mod tests {
             picture.rgba.len(),
             (picture.width * picture.height * 4) as usize
         );
+    }
+
+    #[test]
+    fn fade_arrives_and_stays() {
+        let mut fade = Fade::GREY;
+        fade.toggle(); // heading to the picture
+        for _ in 0..100 {
+            fade.step(0.016); // 100 frames ≈ 1.6 s > 0.6 s
+        }
+        assert_eq!(fade.progress, 1.0); // arrived, not overshot
+        assert_eq!(fade.blend(), 1.0);
+    }
+
+    #[test]
+    fn fade_reverses_mid_way_without_a_jump() {
+        let mut fade = Fade::GREY;
+        fade.toggle();
+        fade.step(FADE_SECONDS * 0.4); // 40 % of the way
+        let before = fade.progress;
+        fade.toggle(); // T again
+        assert_eq!(fade.progress, before); // pressing changed only the target
+        fade.step(0.016);
+        assert!(fade.progress < before && fade.progress > before - 0.05); // small step back
+    }
+
+    #[test]
+    fn smoothstep_keeps_ends_and_middle() {
+        assert_eq!(smoothstep(0.0), 0.0);
+        assert_eq!(smoothstep(0.5), 0.5);
+        assert_eq!(smoothstep(1.0), 1.0);
+        assert!(smoothstep(0.1) < 0.1); // slow start
+        assert!(smoothstep(0.9) > 0.9); // slow finish (already nearly there)
     }
 
     #[test]

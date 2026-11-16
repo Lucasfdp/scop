@@ -21,6 +21,23 @@ use crate::maths::Mat4;
 /// One `mat4` in std140: 16 floats, 64 bytes.
 pub(crate) const MAT4_SIZE: usize = 64;
 
+/// The sticky note (§ 10, § 15): model matrix (bytes 0..64) + blend factor (64..68).
+pub(crate) const PUSH_SIZE: usize = MAT4_SIZE + 4;
+/// Both shaders read the push block: the vertex shader the model, the fragment
+/// shader the blend factor (Q-15.4: a stage missing here fails at pipeline creation).
+pub(crate) const PUSH_STAGES: vk::ShaderStageFlags = vk::ShaderStageFlags::from_raw(
+    vk::ShaderStageFlags::VERTEX.as_raw() | vk::ShaderStageFlags::FRAGMENT.as_raw(),
+);
+
+/// One draw's push-constant bytes: the model matrix, then the blend factor,
+/// laid out like the GLSL block `{ mat4 model; float blend; }`.
+pub(crate) fn push_bytes(model: Mat4, blend: f32) -> [u8; PUSH_SIZE] {
+    let mut bytes = [0u8; PUSH_SIZE];
+    bytes[..MAT4_SIZE].copy_from_slice(&mat4_bytes(model));
+    bytes[MAT4_SIZE..].copy_from_slice(&blend.to_ne_bytes());
+    bytes
+}
+
 /// A `Mat4` as the 64 bytes the GPU reads, column by column (std140 = `Mat4`'s layout).
 pub(crate) fn mat4_bytes(m: Mat4) -> [u8; MAT4_SIZE] {
     let mut bytes = [0u8; MAT4_SIZE];
@@ -70,11 +87,11 @@ impl ShaderInputs {
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)];
-        // The sticky note's size: one mat4, read by the vertex shader.
+        // The sticky note: model + blend factor, read by both shaders (§ 15).
         let push_ranges = [vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .stage_flags(PUSH_STAGES)
             .offset(0)
-            .size(MAT4_SIZE as u32)];
+            .size(PUSH_SIZE as u32)];
         // Room for one set per slot, each holding one uniform-buffer descriptor.
         let pool_sizes = [vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::UNIFORM_BUFFER)
@@ -255,6 +272,14 @@ unsafe fn write_mat4(dst: *mut u8, m: Mat4) {
 mod tests {
     use super::*;
     use crate::maths::Vec3;
+
+    #[test]
+    fn push_bytes_put_blend_after_the_matrix() {
+        let bytes = push_bytes(Mat4::IDENTITY, 0.25);
+        assert_eq!(bytes.len(), 68);
+        assert_eq!(bytes[..64], mat4_bytes(Mat4::IDENTITY));
+        assert_eq!(f32::from_ne_bytes(bytes[64..68].try_into().unwrap()), 0.25);
+    }
 
     #[test]
     fn mat4_bytes_are_column_by_column() {

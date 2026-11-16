@@ -9,7 +9,7 @@ use ash::{Device, khr, vk};
 use crate::depth::DepthImage;
 use crate::gpu::GpuError;
 use crate::mesh::Mesh;
-use crate::shader_inputs::MAT4_SIZE;
+use crate::shader_inputs::{PUSH_SIZE, PUSH_STAGES};
 use crate::swapchain::COLOUR_RANGE;
 
 /// How many frames the CPU may work ahead of the GPU.
@@ -136,7 +136,8 @@ pub(crate) struct Draw<'a> {
     pub(crate) mesh: &'a Mesh,
     /// Set 1: the picture this draw reads (§ 14).
     pub(crate) texture_set: vk::DescriptorSet,
-    pub(crate) model: [u8; MAT4_SIZE],
+    /// The sticky note: model matrix + blend factor (§ 15), as bytes.
+    pub(crate) push: [u8; PUSH_SIZE],
 }
 
 /// Everything a frame's commands need besides the target image.
@@ -291,14 +292,9 @@ pub(crate) fn record_frame(
                 &[draw.texture_set],
                 &[],
             );
-            // The sticky note: this draw's model matrix, bytes 0..64, vertex stage.
-            device.cmd_push_constants(
-                command_buffer,
-                list.layout,
-                vk::ShaderStageFlags::VERTEX,
-                0,
-                &draw.model,
-            );
+            // The sticky note: model (bytes 0..64) + blend (64..68), both stages —
+            // the same stages and size as the layout's range, or validation complains.
+            device.cmd_push_constants(command_buffer, list.layout, PUSH_STAGES, 0, &draw.push);
             // Corners from binding 0, triangles from the index buffer (32-bit indices).
             device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices.handle], &[0]);
             device.cmd_bind_index_buffer(

@@ -20,7 +20,7 @@ use crate::depth::DepthImage;
 use crate::frames::{self, Draw, DrawList, FRAMES_IN_FLIGHT, FrameTarget, Frames};
 use crate::mesh::{Mesh, MeshData};
 use crate::pipeline::{Pipeline, Shaders};
-use crate::shader_inputs::{ShaderInputs, mat4_bytes};
+use crate::shader_inputs::{ShaderInputs, push_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
 use crate::texture::Textures;
@@ -370,17 +370,17 @@ impl GpuContext {
             camera_set: self.inputs.camera_set(slot_index),
             draws: Vec::with_capacity(frame.draws.len()),
         };
-        for &(pipeline, mesh, texture, model) in &frame.draws {
+        for call in &frame.draws {
             match (
-                self.pipelines.get(pipeline.0),
-                self.meshes.get(mesh.0),
-                self.textures.set(texture.0),
+                self.pipelines.get(call.pipeline.0),
+                self.meshes.get(call.mesh.0),
+                self.textures.set(call.texture.0),
             ) {
                 (Some(p), Some(m), Some(t)) => list.draws.push(Draw {
                     pipeline: p.handle,
                     mesh: m,
                     texture_set: t,
-                    model: mat4_bytes(model),
+                    push: push_bytes(call.model, call.blend),
                 }),
                 _ => return Err(GpuError::UnknownHandle),
             }

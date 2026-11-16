@@ -9,9 +9,10 @@ layout(set = 0, binding = 0) uniform Camera {
     mat4 view_proj;   // projection × view, once per frame
 } camera;
 
-// Sticky note: pushed before each draw.
+// Sticky note: pushed before each draw. Same block in mesh.frag (§ 15).
 layout(push_constant) uniform Push {
     mat4 model;       // this object's place and turn
+    float blend;      // § 15: 0 = grey, 1 = picture (used by the fragment shader)
 } push;
 
 layout(location = 0) in vec3 in_position; // from the vertex buffer (3D since § 10)

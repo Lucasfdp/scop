@@ -1,6 +1,6 @@
 # Progress
 
-**Current section:** 15
+**Current section:** 16
 **Last session:** 2026-11-11
 
 ## Sections
@@ -21,7 +21,7 @@
 | 12 | done | passed after misses (Q-12.2: fan starts from the first corner on the line, not the one nearest the origin — fresh variant passed; Q-12.5 asked for the 2-card at-origin version; Q-12.1 forgot the skipped lines) — checkpoint code by Claude (engine obj.rs: parse_obj, ObjModel, ObjError; scop loads/centres/frames the model) verified on Mac (42.obj, teapot, teapot2 render upright, clean) ; explain-back passed (added: positions.len() also resolves negative indices; line-free helpers are simpler/testable) | 2026-11-14 | paused | Section written 2026-11-14 |
 | 13 | done | passed after misses (Q-13.1: shared corners don't distinguish faces at all — greys bleed from each corner; Q-13.3: held on a toggle flips every frame, not 'spin while held' — both fresh variants passed; Q-13.4: consequence filled in (position gets turned → moves away / orbits); Q-13.5: radius scales *movement*, 0.2 = fraction of model size per second) — checkpoint code by Claude (ObjModel::triangle_faces; grey_faces duplicated corners + face_grey; Placement + 5-card matrix; key controls) verified on Mac (greys, all keys; +/− didn't register on Spanish layout → switched to W/S) ; explain-back passed with misses (old .obj indices on duplicated vertices = in range but wrong corners, silent — not 'running out'; `*p =` writes through the reference; `&mut` = arrow to the original vs no `&` = copy; spin + angles.y: Space stops `spin` growing, nothing resets) | 2026-11-14 | paused | Section written 2026-11-14 |
 | 14 | done | passed after misses (Q-14.4: staging is worth it *because* the CPU writes once; Q-14.5: thought UNORM texture → too dark — it's too pale (no decode in, still encode out = double-encoded); fresh variants passed: SRGB tex + UNORM swapchain = too dark, both UNORM = looks right) — checkpoint code by Claude (tga.rs loader; texture.rs upload + 2 transitions + sampler + set 1 + white texture 0; run_once helper; planar UVs; embedded texture) verified on Mac (owner's reaper-turtle picture upright, correct colours, streaks on thin sides) ; explain-back passed (first_set must match `set = N`; white = 1.0 per channel, neutral when multiplying — not 'the base colour') | 2026-11-15 | paused | Section written 2026-11-15 |
-| 15 | in-progress | — | 2026-11-15 | paused | Section written; gate not yet attempted |
+| 15 | done | passed after misses (Q-15.2: swapped roles — key flips the target, blend steps towards it; Q-15.4: error at pipeline creation, not cmd_push_constants — both fresh variants passed; Q-15.3/15.5 precisions: reverses from where it is; smoothstep changes the pace) — checkpoint code by Claude (push block 68 bytes VERTEX|FRAGMENT, DrawCall, mix in frag, Fade target/progress + clamp + smoothstep, T key) verified on Mac (fades both ways, reverses mid-fade) ; explain-back passed with misses (`+= gap` snaps in one frame — it doesn't overshoot; `+= max_step` is the one that overshoots; easing is applied once on output to a linearly stepped progress) | 2026-11-15 | paused | Section written 2026-11-15 |
 | 16–19 | not written | — | | — | Written on arrival |
 
 ## Prerequisite audit (2026-11-02)
@@ -38,6 +38,7 @@
 
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
+| Target vs value: the key flips the target, the value steps towards it each frame (reversible, no jump) — fresh variant | § 15 | 0 | after § 17 |
 | sRGB: decode on texture read (darkens) + encode on swapchain write (brightens) must pair up — fresh variant | § 14 | 0 | after § 16 |
 | Rust references: `let p = &mut x` is an arrow to x (changes reach x) vs `let p = x` is a copy; `*p = v` replaces the whole value — fresh variant | § 13 explain-back | 0 | after § 15 |
 | held vs pressed: toggles need `pressed` (held flips every frame) — fresh variant | § 13 | 0 | after § 15 |
