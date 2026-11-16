@@ -281,6 +281,29 @@ mod tests {
     }
 
     #[test]
+    fn self_evaluation_files() {
+        // § 16: the kinds of file an evaluator brings.
+        let read =
+            |name: &str| std::fs::read_to_string(format!("../resources/test/{name}")).unwrap();
+        let cube = parse_obj(&read("cube_vt_vn.obj")).unwrap();
+        assert_eq!((cube.positions.len(), cube.triangles.len()), (8, 12)); // 6 quads × 2
+        assert_eq!(cube.centre(), Vec3::new(3.0, 1.0, 1.0)); // not centred in the file
+        let prism = parse_obj(&read("ngon_negative.obj")).unwrap();
+        // 2 hexagons × 4 triangles + 6 quads × 2 = 20, from 8 faces.
+        assert_eq!(prism.triangles.len(), 20);
+        assert_eq!(prism.triangle_faces.iter().max(), Some(&7));
+        let err = parse_obj(&read("broken.obj")).unwrap_err();
+        assert_eq!(err.line, 7);
+        assert!(matches!(
+            err.kind,
+            ObjErrorKind::IndexOutOfRange {
+                index: 7,
+                defined: 3
+            }
+        ));
+    }
+
+    #[test]
     fn real_files_load() {
         let logo = parse_obj(&std::fs::read_to_string("../resources/42.obj").unwrap()).unwrap();
         assert_eq!(logo.positions.len(), 42);

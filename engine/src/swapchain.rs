@@ -33,6 +33,10 @@ pub(crate) struct Swapchain {
 impl Swapchain {
     /// Asks the surface what it supports, picks from it, and creates the swapchain
     /// and its image views. `window_size` is in physical pixels.
+    ///
+    /// `old` is the swapchain being replaced after a resize (§ 16), or null the first
+    /// time: handing it over lets the driver reuse its resources and avoids two
+    /// swapchains fighting over one window. The caller still destroys the old one.
     pub(crate) fn new(
         device: &Device,
         loader: &khr::swapchain::Device,
@@ -40,6 +44,7 @@ impl Swapchain {
         surface: vk::SurfaceKHR,
         physical_device: vk::PhysicalDevice,
         window_size: (u32, u32),
+        old: vk::SwapchainKHR,
     ) -> Result<Self, GpuError> {
         // The three menus the surface offers.
         // SAFETY: plain queries on a live physical device and surface.
@@ -70,7 +75,8 @@ impl Swapchain {
             .pre_transform(caps.current_transform)
             .composite_alpha(choose_composite_alpha(&caps))
             .present_mode(present_mode)
-            .clipped(true);
+            .clipped(true)
+            .old_swapchain(old);
 
         // SAFETY: every pointer in `create_info` points to data alive until this call returns.
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };

@@ -207,3 +207,24 @@ the camera uniform buffer (it's per draw, not per frame); a linear fade (abrupt 
 **Why:** reversible at any moment, frame-rate independent, no abrupt cuts.
 **Cost accepted:** the push block grows to 68 of the guaranteed 128 bytes.
 **Revisit if:** more per-draw data appears (move it to a buffer with dynamic offsets).
+
+## 2026-11-16 — Resize by full rebuild after `device_wait_idle`; `make` + `scripts/deps.sh`
+**Chose:** on `Resized` (non-zero), out-of-date or suboptimal: `device_wait_idle`, destroy
+and recreate the swapchain and depth image at the window's current size. `make` runs a
+dependency script (Rust via rustup in the home folder; `glslc` / Vulkan via Homebrew on
+macOS, reported with the install command on Linux) and a release build.
+**Rejected:** recreating with `old_swapchain` while frames are still in flight (smoother
+during a drag, but more sync to reason about for a rare event); a script that tries `sudo`
+(fails or prompts on campus machines).
+**Why:** simplest correct resize; a setup command that never pretends to have installed
+something it couldn't.
+**Cost accepted:** a brief GPU pause on each resize; on campus Linux, missing system
+packages must be installed by hand.
+**Revisit if:** live-resize smoothness matters (ft_vox).
+**Update (same day, owner's choice — option C):** campus machines allow `curl`/`pip` but not
+admin installs. So: compiled `.spv` files are committed as a fallback and `build.rs` uses
+`glslc` when present, else the committed ones (with a warning; a test checks they're not
+stale); and `deps.sh` offers to `curl` the LunarG Vulkan SDK into the home folder when
+`glslc` is missing. Rejected: A alone (a 250 MB download blocks the build), B alone (no
+real compiler on campus). Cost: `.spv` must be refreshed when shaders change (the test
+catches it); this reverses the 2026-11-07 "don't commit `.spv`" choice for the fallback copy.

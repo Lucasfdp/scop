@@ -1261,3 +1261,37 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### push constant range for two stages
 **Plain:** one range visible to the vertex **and** fragment shaders: model (64 bytes) + blend (4 bytes) = 68.
 **Introduced in:** § 15
+
+## Section 16 — Making the mandatory part perfect
+
+### swapchain recreation
+**Plain:** after a resize, wait for the GPU, destroy the old swapchain and make a new one at the window's new size (same format and present mode).
+**Introduced in:** § 16
+
+### out of date and suboptimal
+**Plain:** acquire/present results after a resize: out of date = unusable, rebuild; suboptimal = still works but no longer matches. scop rebuilds on both.
+**Introduced in:** § 16
+
+### size-dependent objects
+**Plain:** what's rebuilt with the swapchain: its images and views, and the depth image. Not pipelines (dynamic viewport), camera, meshes, textures.
+**Introduced in:** § 16
+
+### dependency check
+**Plain:** a script that looks for each required tool, reports what's missing, and installs what it safely can.
+**Introduced in:** § 16
+
+### Makefile target
+**Plain:** a named recipe: `make` (deps + build), `make run`, `make clean`, `fclean`, `re`.
+**Introduced in:** § 16
+
+### release build
+**Plain:** `cargo build --release` — optimised, and without the validation layer.
+**Introduced in:** § 16
+
+### self-evaluation
+**Plain:** checking every subject requirement yourself, with a way to show it, before evaluation.
+**Introduced in:** § 16
+
+### defence
+**Plain:** the evaluation conversation: the evaluator runs scop, tries their own files, and asks you to explain code and decisions.
+**Introduced in:** § 16

@@ -221,7 +221,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
     let Some(path) = args.get(1) else {
-        eprintln!("usage: scop <file.obj>");
+        eprintln!("usage: scop <file.obj> [picture.tga]");
         return ExitCode::FAILURE;
     };
 
@@ -245,14 +245,29 @@ fn main() -> ExitCode {
         obj.triangles.len()
     );
 
-    // Our own TGA loader (§ 14); a broken picture is reported like a broken model.
-    let picture = match engine::load_tga(TEXTURE_TGA) {
+    // The picture: a .tga given as 2nd argument, or the embedded one (§ 14).
+    // Our own TGA loader either way; a broken picture is reported like a broken model.
+    let (picture_name, picture_bytes) = match args.get(2) {
+        Some(tga_path) => match std::fs::read(tga_path) {
+            Ok(bytes) => (tga_path.as_str(), bytes),
+            Err(err) => {
+                eprintln!("scop: {tga_path}: {err}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => ("resources/texture.tga (embedded)", TEXTURE_TGA.to_vec()),
+    };
+    let picture = match engine::load_tga(&picture_bytes) {
         Ok(picture) => picture,
         Err(err) => {
-            eprintln!("scop: resources/texture.tga: {err}");
+            eprintln!("scop: {picture_name}: {err}");
             return ExitCode::FAILURE;
         }
     };
+    println!(
+        "{picture_name}: {}x{} picture",
+        picture.width, picture.height
+    );
 
     let config = WindowConfig {
         title: String::from("scop"),

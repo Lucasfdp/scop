@@ -1,0 +1,7 @@
+# Self-evaluation file (§ 16): broken on purpose.
+# scop must print a clear error with the line number and exit — never panic.
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+f 1 2 7

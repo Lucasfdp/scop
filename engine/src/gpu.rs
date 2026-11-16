@@ -123,9 +123,11 @@ pub(crate) struct GpuContext {
 pub(crate) enum FrameStatus {
     /// Drawn and shown.
     Presented,
-    /// Drawn and shown, but the swapchain no longer matches the window exactly.
+    /// Drawn and shown, but the swapchain no longer matches the window exactly:
+    /// the caller should `rebuild_for_window` before the next frame (§ 16).
     Suboptimal,
-    /// Skipped: the swapchain no longer matches the window. Rebuilding comes in § 16.
+    /// Skipped: the swapchain no longer matches the window and can't be used.
+    /// The caller must `rebuild_for_window` before the next frame (§ 16).
     OutOfDate,
 }
 
@@ -213,6 +215,7 @@ impl GpuContext {
             surface,
             physical_device,
             size,
+            vk::SwapchainKHR::null(), // first one: nothing to replace
         )
         .map_err(|e| {
             // SAFETY: the swapchain cleaned up after itself; nothing else uses the device.
@@ -345,6 +348,47 @@ impl GpuContext {
         };
         self.textures
             .add(&uploader, self.inputs.texture_set_layout, image)
+    }
+
+    /// After a resize (§ 16): waits for the GPU, then replaces the swapchain and the
+    /// depth image with ones of `size` (physical pixels). Pipelines, camera buffers,
+    /// meshes and textures don't depend on the window size, so they stay.
+    pub(crate) fn rebuild_for_window(&mut self, size: (u32, u32)) -> Result<(), GpuError> {
+        // SAFETY: after the wait, nothing submitted uses the old swapchain or depth image.
+        unsafe {
+            // The CPU waits until the GPU has finished all submitted work.
+            self.device.device_wait_idle()?;
+
+            let swapchain = Swapchain::new(
+                &self.device,
+                &self.swapchain_loader,
+                &self.surface_loader,
+                self.surface,
+                self.physical_device,
+                size,
+                self.swapchain.handle, // hand over the old one
+            )?;
+            let old = std::mem::replace(&mut self.swapchain, swapchain);
+            old.destroy(&self.device, &self.swapchain_loader);
+
+            // The pipelines were built for one colour format; a resize never changes
+            // it in practice, but if it ever did, drawing would be wrong — say so.
+            if self.swapchain.format != old.format {
+                return Err(GpuError::Unsupported("swapchain format changed on resize"));
+            }
+
+            // The depth image must match the new size exactly (one depth slot per pixel).
+            let depth = DepthImage::new(
+                &self.instance,
+                self.physical_device,
+                &self.device,
+                &self.memory_types,
+                self.swapchain.extent,
+            )?;
+            let old_depth = std::mem::replace(&mut self.depth, depth);
+            old_depth.destroy(&self.device);
+        }
+        Ok(())
     }
 
     /// Width ÷ height of the swapchain images, i.e. of what the next frame draws into.

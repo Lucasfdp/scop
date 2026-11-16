@@ -471,3 +471,33 @@ the blend value the fragment shader reads would be undefined.)
 with a sudden "kick". smoothstep starts slowly, speeds up in the middle, and slows down
 again at the end, so you see the difference at the **very beginning and very end** of the
 fade — it eases in and out instead of starting and stopping abruptly.
+
+## Section 16
+
+**A-16.1** The swapchain's images are made for **one window size**; after a resize they no
+longer fit, and acquire/present report out-of-date (or suboptimal). The **depth image**
+must be rebuilt with it, because it has to be exactly the swapchain's size (one depth slot
+per pixel). The pipelines don't need rebuilding because viewport and scissor are
+**dynamic state**, set per frame from the current extent (§ 6) — and the formats don't change.
+
+**A-16.2** The GPU may still be using the old swapchain's images, views and semaphores for
+frames already submitted. Destroying them under it is a **validation error** (object in
+use) and can crash or lose the device. `device_wait_idle` first guarantees nothing is in use.
+
+**A-16.3** It checks for **`cargo`/Rust**, **`glslc`** and the **Vulkan loader** (and MoltenVK on
+macOS). Rust can always be installed into your home folder (rustup, no admin). On campus
+Linux, `glslc` and Vulkan are **system packages that need admin rights**, so the script
+can't install them — it reports exactly what's missing and the command to get it. The
+subject says *check for and possibly install*: checking is required, installing only
+where possible.
+
+**A-16.4** (1) First line in italics: *This project has been created as part of the 42
+curriculum by luferna3.* (2) A **Description** section (goal + brief overview).
+(3) An **Instructions** section (compilation, installation, execution). (4) A **Resources**
+section with classic references **and** how AI was used — for which tasks and which parts.
+
+**A-16.5** `vt` and `vn` lines are **skipped** (scop makes its own UVs and doesn't light).
+`f 1/1/1 2/2/2 3/3/3` uses only the part before the first `/`, so it's corners 1, 2, 3
+→ 0-based 0, 1, 2. The 5-corner face is **fan-triangulated** into 3 triangles, all with the
+same grey (one face number) — correct if it's convex; a concave one may show stray
+triangles (§ 17 bonus).

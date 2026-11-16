@@ -14,7 +14,7 @@ use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
 use crate::app::{App, Flow, Frame, Gfx};
-use crate::gpu::{GpuContext, GpuError};
+use crate::gpu::{FrameStatus, GpuContext, GpuError};
 use crate::input::{Input, Key};
 
 /// What the app asks for when opening a window.
@@ -77,6 +77,7 @@ pub fn run<A: App>(config: WindowConfig, app: A) -> Result<(), RunError> {
         input: Input::default(),
         last_frame: Instant::now(),
         minimised: false,
+        needs_rebuild: false,
         graphics: None,
         error: None,
     };
@@ -94,6 +95,8 @@ struct Runner<A: App> {
     input: Input,
     last_frame: Instant,
     minimised: bool,
+    /// The swapchain no longer matches the window: rebuild before the next frame (§ 16).
+    needs_rebuild: bool,
     graphics: Option<Graphics>,
     error: Option<RunError>,
 }
@@ -134,14 +137,33 @@ impl<A: App> Runner<A> {
         let Some(graphics) = &mut self.graphics else {
             return;
         };
+
+        // § 16: the window changed size (or the last frame said "out of date"):
+        // rebuild the swapchain and depth image at the current size first.
+        if self.needs_rebuild {
+            let size = graphics.window.inner_size();
+            if size.width == 0 || size.height == 0 {
+                return; // minimised: nothing to build for; the Resized event restarts us
+            }
+            if let Err(e) = graphics.gpu.rebuild_for_window((size.width, size.height)) {
+                return self.fail(event_loop, e.into());
+            }
+            self.needs_rebuild = false;
+        }
+
         // The aspect of the image this frame will be drawn into, fresh every frame.
         let mut frame = Frame::new(graphics.gpu.aspect());
         self.app.draw(&mut frame);
 
         match graphics.gpu.draw_frame(&frame) {
-            // OutOfDate/Suboptimal: the swapchain no longer matches the window.
-            // Rebuilding it is § 16; until then frames may be skipped after a resize.
-            Ok(_status) => graphics.window.request_redraw(),
+            Ok(status) => {
+                // OutOfDate (frame skipped) or Suboptimal (shown, but mismatched):
+                // the swapchain no longer fits the window — rebuild before the next one.
+                if status != FrameStatus::Presented {
+                    self.needs_rebuild = true;
+                }
+                graphics.window.request_redraw();
+            }
             Err(e) => self.fail(event_loop, e.into()),
         }
     }
@@ -188,6 +210,10 @@ impl<A: App> ApplicationHandler for Runner<A> {
                 // stop drawing until the window has a real size again.
                 let was_minimised = self.minimised;
                 self.minimised = size.width == 0 || size.height == 0;
+                // Any real size change: the swapchain must follow (§ 16).
+                if !self.minimised {
+                    self.needs_rebuild = true;
+                }
                 let restored = was_minimised && !self.minimised;
                 if let Some(graphics) = self.graphics.as_ref().filter(|_| restored) {
                     graphics.window.request_redraw(); // restart the frame loop

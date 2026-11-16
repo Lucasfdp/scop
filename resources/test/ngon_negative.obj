@@ -1,0 +1,28 @@
+# Self-evaluation file (§ 16): a hexagonal prism.
+# - the two caps are 6-corner faces (n-gons → fan-triangulated, one grey each)
+# - every face uses NEGATIVE indices: -1 = the last corner defined so far
+# - comments at the end of lines, blank lines, Windows-style tolerance
+
+# bottom ring (y = 0)
+v  1.000 0.0  0.000
+v  0.500 0.0  0.866
+v -0.500 0.0  0.866
+v -1.000 0.0  0.000
+v -0.500 0.0 -0.866
+v  0.500 0.0 -0.866
+# top ring (y = 2)
+v  1.000 2.0  0.000
+v  0.500 2.0  0.866
+v -0.500 2.0  0.866
+v -1.000 2.0  0.000
+v -0.500 2.0 -0.866
+v  0.500 2.0 -0.866
+
+f -12 -7 -8 -9 -10 -11   # bottom cap: 6 corners
+f -6 -5 -4 -3 -2 -1      # top cap: 6 corners
+f -12 -11 -5 -6          # sides: quads
+f -11 -10 -4 -5
+f -10 -9 -3 -4
+f -9 -8 -2 -3
+f -8 -7 -1 -2
+f -7 -12 -6 -1
