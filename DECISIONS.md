@@ -228,3 +228,41 @@ stale); and `deps.sh` offers to `curl` the LunarG Vulkan SDK into the home folde
 `glslc` is missing. Rejected: A alone (a 250 MB download blocks the build), B alone (no
 real compiler on campus). Cost: `.spv` must be refreshed when shaders change (the test
 catches it); this reverses the 2026-11-07 "don't commit `.spv`" choice for the fallback copy.
+
+## 2026-11-18 — Ear clipping for 4+ corner faces; the teapot drawn as modelled
+**Chose:** faces with 4+ corners are triangulated by ear clipping on the outline flattened
+along Newell's normal, falling back to a fan if no ear is found (broken / self-intersecting
+faces). The original teapot is drawn as-is.
+**Rejected:** keeping the fan (stray triangles on concave faces); a triangulation library
+(forbidden); welding the teapot's near-touching corners (~0.017 apart) to close the lid slit.
+**Why:** correct for every simple face, never hangs; the teapot's lid slit is in the model —
+measured: ~100 open edges at the lid rim in *both* `teapot.obj` and `teapot2.obj`, and both
+render the same in scop (side-by-side screenshots, 2026-11-18).
+**Cost accepted:** O(n²) per face (fine for real faces); the slit stays visible.
+**Revisit if:** models with thousand-corner faces, or a stitched (watertight) mesh is needed (ft_newton physics).
+**Update (same day, checkpoint):** the ear search starts at corner 1, so convex faces get
+exactly § 12's fan (the logo and teapots are byte-for-byte unchanged). The new
+`open edges` count compares corners with −0.0 treated as 0.0: `teapot.obj` writes 86
+coordinates as `-0.000000` (`teapot2.obj` none) — the same points, different bit patterns,
+and a likely cause of other renderers' "edge artifacts". Both teapots: 160 open edges.
+
+## 2026-11-18 — Bonus texturing: box mapping, a picture per object, view modes, zoom
+**Chose (owner's scope: § 18 + three extras):** per-face box mapping by Newell normal, one
+scale for u and v plus picture-aspect correction; `o`/`g` lines split objects, one mesh and
+draw per object, pictures from the command line assigned in turn (N rotates); V cycles
+fill → wireframe (`POLYGON_MODE_LINE`, `fillModeNonSolid` enabled if supported) → points
+(`POINT_LIST` pipeline + `gl_PointSize`); zoom = field of view on the mouse wheel and Z/X.
+**Rejected:** triplanar shader (smoother seams, 3× lookups, needs normals — ft_vox);
+`.mtl` `map_Kd` texture names (a § 19 idea); `POLYGON_MODE_POINT` (Metal can't:
+portability subset `pointPolygons`); an edge index buffer for wireframe (more code).
+**Why:** removes the visible stretching the bonus asks about; each extra reuses an earlier
+section (§ 17 normals, § 14 sets, § 6 pipelines, § 9 field of view).
+**Cost accepted:** texture seams where faces meet at an angle; three pipelines per shader pair.
+**Revisit if:** seams look bad on organic models (go triplanar).
+
+## 2026-11-18 — Bonus extras split into §§ 19–23
+
+**Chosen:** seven extras, one module each: § 19 FPS counter + drag & drop + debug colours; § 20 orbit camera + directional light; § 21 shader hot-reload; § 22 instancing; § 23 skybox (+ reflections).
+**Rejected:** one big § 19 (too much for one gate); `.mtl` colours and screenshot-to-TGA (least reuse).
+**Why:** the owner wants this engine groundwork done himself before the group projects (ft_newton, ft_vox), where it would otherwise be missing or written under time pressure.
+**Cost accepted:** more time on scop beyond what the bonus is graded on; the bonus grade itself only needs §§ 17–18. The skybox depends on § 20's camera, and instancing on § 20 too.

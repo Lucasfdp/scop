@@ -19,6 +19,7 @@ mod spirv;
 mod swapchain;
 mod texture;
 mod tga;
+mod triangulate;
 
 // The whole public API.
 pub use app::{App, Flow, Frame, Gfx, GpuInfo, MeshId, PipelineId, TextureId};

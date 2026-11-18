@@ -1,13 +1,13 @@
 ---
-section: 19
-slug: bonus-extras
-tier: TBD
+section: 23
+slug: bonus-skybox
+tier: T1
 status: not-started
-prereqs: [16]
+prereqs: [14, 20]
 terms: []
 ---
 
-# Section 19 — Your own extras
+# Section 23 — A sky around the scene
 
 _Written when you reach this section._
 
@@ -22,4 +22,3 @@ _Written when you reach this section._
 ## Checkpoint
 
 ## Questions
-

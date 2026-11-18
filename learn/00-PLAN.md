@@ -81,11 +81,18 @@ maths capped at T1; pointers and windowing already known from C/C++, raylib and 
 | Smooth colour↔texture transition | 3 | 1 | 1 | 5 | T1 |
 | Bonus: concave/non-coplanar faces | 2 | 2 | 2 | 6 | T1 |
 | Bonus: texture mapping without stretching | 2 | 2 | 2 | 6 | T1 |
+| Extra: FPS, drag & drop, debug colours | 1 | 2 | 1 | 4 | T1 |
+| Extra: orbit camera + directional light | 2 | 3 | 3 | 8 | T2 (reused in ft_newton, ft_vox) |
+| Extra: shader hot-reload | 1 | 2 | 2 | 5 | T1 |
+| Extra: instancing | 2 | 3 | 3 | 8 | T2 (ft_vox's blocks) |
+| Extra: skybox (cube map) | 2 | 2 | 2 | 6 | T1 |
 
 **Vehicle note:** scop is an excellent vehicle for **the Vulkan object model and the
 rendering pipeline** — one object, no distractions. It is a poor vehicle for
 **performance** (one mesh), **maths depth** (only one camera and one model matrix)
 and **lighting**. Those are deliberately left to ft_newton and ft_vox.
+
+**Update 2026-11-18 (owner):** the extras §§ 19–23 deliberately bring in a first camera, one light, instancing and a skybox now, as engine groundwork before the group projects. They stay at the depth scop needs; ft_newton and ft_vox go deeper.
 
 ## Sections
 
@@ -109,7 +116,11 @@ and **lighting**. Those are deliberately left to ft_newton and ft_vox.
 | 16 | `16-mandatory-finish.md` | Making the mandatory part perfect | T1 | not started | Resize handling, `make` one-liner, README, self-evaluation |
 | 17 | `17-bonus-complex-obj.md` | Concave and non-flat faces | T1 | not started | Original teapot renders cleanly |
 | 18 | `18-bonus-texture-mapping.md` | Textures without stretching | T1 | not started | No stretched faces |
-| 19 | `19-bonus-extras.md` | Your own extras | TBD | not started | Decided later |
+| 19 | `19-bonus-quality-of-life.md` | Quality of life: FPS, drag & drop, debug colours | T1 | not started | FPS in the title, drop a `.obj` to load it, debug colour modes (facing / depth) |
+| 20 | `20-bonus-camera-and-lighting.md` | A camera you steer, and light | T2 | not started | Mouse orbit camera; one directional light shading faces by angle |
+| 21 | `21-bonus-shader-hot-reload.md` | Shaders that reload while running | T1 | not started | Edit a shader, see it change without restarting |
+| 22 | `22-bonus-instancing.md` | Hundreds of copies in one draw | T2 | not started | Hundreds of spinning logos from one mesh and one draw |
+| 23 | `23-bonus-skybox.md` | A sky around the scene | T1 | not started | Cube-map skybox, plus a chrome (reflective) mode |
 
 Sections 3–19 are written when you reach them, so the plan adapts to what turns
 out to be hard.

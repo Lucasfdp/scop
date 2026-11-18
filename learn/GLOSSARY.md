@@ -1295,3 +1295,103 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### defence
 **Plain:** the evaluation conversation: the evaluator runs scop, tries their own files, and asks you to explain code and decisions.
 **Introduced in:** § 16
+
+## Section 17 — Concave and non-flat faces
+
+### reflex corner
+**Plain:** a corner pointing inwards (inside angle over 180°). Only concave faces have them.
+**Introduced in:** § 17
+
+### ear
+**Plain:** three consecutive corners whose triangle is fully inside the polygon — safe to cut off.
+**Introduced in:** § 17
+
+### ear clipping
+**Plain:** triangulating by cutting off ears one at a time until one triangle is left (`n − 2` triangles).
+**Introduced in:** § 17
+
+### polygon normal
+**Plain:** the direction a face points (a direction, `w = 0`).
+**Introduced in:** § 17
+
+### Newell's method
+**Plain:** a polygon normal computed from every corner, so it's right for concave and bent faces too.
+**Introduced in:** § 17
+
+### flattening a polygon
+**Plain:** dropping the axis the normal points along most, to get a 2D outline for the ear tests.
+**Introduced in:** § 17
+
+### point-in-triangle test
+**Plain:** a 2D point is inside a triangle if it's on the same side of all three edges.
+**Introduced in:** § 17
+
+### self-intersecting polygon
+**Plain:** a face whose edges cross (a bow-tie). Ear clipping can get stuck; scop fans the rest.
+**Introduced in:** § 17
+
+### open edge
+**Plain:** an edge used by only one triangle — the surface has a border there. The teapot's lid rim has ~100.
+**Introduced in:** § 17
+
+### area check
+**Plain:** a correct triangulation of a flat face covers exactly its area; a bad fan covers more.
+**Introduced in:** § 17
+
+## Section 18 — Better texturing, view modes and zoom
+
+### box mapping
+**Plain:** per face, use one of three projections (along x, y or z) — whichever the face looks along most. No face is edge-on, so no streaks.
+**Introduced in:** § 18
+
+### texel density
+**Plain:** texels per unit of surface. Same in both directions (one scale for u and v) = no stretching.
+**Introduced in:** § 18
+
+### texture seam
+**Plain:** an edge where the picture jumps because neighbouring faces use different projections.
+**Introduced in:** § 18
+
+### triplanar mapping
+**Plain:** blending all three projections per pixel in the shader to hide seams. Smoother, costlier; not done here.
+**Introduced in:** § 18
+
+### object line
+**Plain:** `o name` (or `g name`) in an `.obj`: the following faces belong to a new object.
+**Introduced in:** § 18
+
+### per-object bounding box
+**Plain:** min/max of one object's corners — the frame its picture is fitted to.
+**Introduced in:** § 18
+
+### one draw per object
+**Plain:** each object its own mesh and `draw_textured`, so each can bind its own picture.
+**Introduced in:** § 18
+
+### polygon mode
+**Plain:** how triangles are rasterised: `FILL` (solid), `LINE` (edges), `POINT` (corners).
+**Introduced in:** § 18
+
+### fillModeNonSolid
+**Plain:** the device feature `LINE`/`POINT` modes need — must be enabled when creating the device, not just supported.
+**Introduced in:** § 18
+
+### portability subset
+**Plain:** what Vulkan-on-Metal (MoltenVK) can't do. E.g. `pointPolygons`: no triangles-as-points on Metal.
+**Introduced in:** § 18
+
+### point list
+**Plain:** pipeline topology `POINT_LIST`: every vertex drawn as a dot. scop's points mode.
+**Introduced in:** § 18
+
+### gl_PointSize
+**Plain:** what the vertex shader writes to set each dot's size in pixels; required for points.
+**Introduced in:** § 18
+
+### zoom vs dolly
+**Plain:** zoom = narrow the field of view (flatter look); dolly = move closer (more perspective).
+**Introduced in:** § 18
+
+### scroll delta
+**Plain:** how far the mouse wheel moved this frame; lines (mouse) and pixels (trackpad) turned into one number.
+**Introduced in:** § 18

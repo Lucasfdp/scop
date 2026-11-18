@@ -1,8 +1,9 @@
 # scop — one-line setup: `make` checks/installs dependencies, then builds (§ 16).
 #
 #   make              deps + release build
-#   make run          run with OBJ (default: the 42 logo) and optional TEX (a .tga picture)
-#                     e.g. make run OBJ=resources/teapot.obj TEX=resources/other.tga
+#   make run          run with OBJ (default: the 42 logo) and optional TEXTURE (a .tga picture)
+#                     e.g. make run OBJ=resources/teapot.obj TEXTURE=resources/other.tga
+#                     (not TEX: that's one of make's own built-in variables, set to "tex")
 #   make deps         check for (and where possible install) Rust, glslc, Vulkan
 #   make sdk          download the LunarG Vulkan SDK (glslc) into your home folder — no admin
 #   make spv          refresh the committed SPIR-V fallback in scop/shaders/spv/
@@ -10,7 +11,7 @@
 #   make clean / fclean / re
 
 OBJ ?= resources/42.obj
-TEX ?=
+TEXTURE ?=
 SDK_DIR := $(HOME)/.local/vulkan-sdk
 
 # Tools installed into the home folder (rustup, the SDK) must be found even in the
@@ -29,7 +30,7 @@ build:
 	cargo build --release
 
 run: build
-	./target/release/scop $(OBJ) $(TEX)
+	./target/release/scop $(OBJ) $(TEXTURE)
 
 test:
 	cargo test

@@ -40,7 +40,7 @@ home folder if you want it.
 ```sh
 make run                              # the 42 logo
 make run OBJ=resources/teapot.obj     # any .obj file
-make run TEX=path/to/picture.tga      # a different picture, no rebuild needed
+make run TEXTURE=path/to/picture.tga  # a different picture, no rebuild needed
 ./target/release/scop path/to/model.obj [path/to/picture.tga]
 ```
 
@@ -80,6 +80,9 @@ without rebuilding, pass it as the second argument. Pictures must be 24- or 32-b
 - `.obj`: `v` and `f` lines; faces with any number of corners (fan-triangulated),
   `v/vt/vn` tokens, negative indices; anything else is skipped. Broken files give an error
   with the line number.
+- Concave and non-flat faces split by ear clipping (bonus); scop prints each model's
+  open edges (gaps in the surface). The teapot's lid gap is in the model itself: both
+  teapot files report 160 open edges, and macOS Quick Look shows the same gap.
 - One flat grey per `.obj` face (each triangle gets its own corners).
 - Perspective camera that frames any model from its bounding box; the model turns around
   the bounding box's centre.

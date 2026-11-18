@@ -501,3 +501,56 @@ section with classic references **and** how AI was used — for which tasks and 
 → 0-based 0, 1, 2. The 5-corner face is **fan-triangulated** into 3 triangles, all with the
 same grey (one face number) — correct if it's convex; a concave one may show stray
 triangles (§ 17 bonus).
+
+## Section 17
+
+**A-17.1** An **ear** is three consecutive corners whose triangle lies entirely **inside** the
+polygon: the middle corner points outwards (convex turn) and no other corner is inside the
+triangle. Cutting it off removes only area that belongs to the face, and what's left is still a
+valid polygon with one corner fewer — so repeating always ends in a correct triangulation.
+
+**A-17.2** The **area check**: for a flat face, a correct triangulation's triangle areas add up to
+exactly the face's area. A fan from a bad corner of an L includes a triangle that reaches
+outside the shape, so its areas add up to **more** than the face's area (and overlap).
+
+**A-17.3** The ear tests ("does it turn outwards?", "is a corner inside this triangle?") are
+simple and reliable in **2D**; flattening along the face's normal keeps its outline and
+turning direction. **Newell's normal** uses every corner, so it gives the true average facing
+even for concave or bent faces; the cross product of the first two edges only sees three
+corners — if the middle one is a **reflex** corner, it points the *wrong way* and every test
+would be inverted.
+
+**A-17.4** It stops looking for ears and **fans the remaining corners** (the fallback). That
+guarantees the loop ends (no hang on a broken file) and still draws something reasonable for
+that face, while the rest of the model loads normally — better than refusing a whole model
+over one malformed face.
+
+**A-17.5** Show it's **in the file**: both `teapot.obj` and `teapot2.obj` render the same rings
+from the same angle, and counting edges shows ~100 **open edges** around the lid rim in both
+files (edges used by only one triangle — the lid and body surfaces never join). scop draws
+exactly what the file describes, from both sides, with correct depth.
+
+## Section 18
+
+**A-18.1** § 14 projected the picture along **one** axis for the whole model. Faces running
+*along* that axis (the logo's thin sides) are edge-on to the projection: every point on them maps
+to almost the same thin strip of the picture, which gets smeared across the face. Box mapping
+gives **each face** the projection it faces most directly (by its Newell normal), so no face is
+ever edge-on to its projector.
+
+**A-18.2** Dividing each by its own side squeezes the picture to fit the box both ways: on a long
+thin object, one direction gets many more texels per unit than the other, so the picture
+**stretches**. One shared scale keeps the same texel density across and down — squares stay square.
+
+**A-18.3** Which picture a draw reads is decided by the **texture set bound for that draw** (set 1,
+§ 14). One mesh drawn once can only have one set bound, so one picture. Splitting the model into
+one mesh per object, each drawn with its own `draw_textured`, lets each bind its own picture.
+
+**A-18.4** A **validation error when the pipeline is created**: `POLYGON_MODE_LINE` requires the
+`fillModeNonSolid` feature to be **enabled on the device**, not just supported by the GPU. (Without
+validation, the result is undefined — maybe solid triangles, maybe a crash.)
+
+**A-18.5** The **perspective** differs. Moving closer exaggerates it: parts nearer the camera grow
+much more than parts further away, so the model looks deeper and more distorted. Zooming keeps the
+camera where it is and only crops the view, so near and far parts grow equally: the model looks
+**flatter**, like a telephoto shot. (Same size on screen, different shape.)

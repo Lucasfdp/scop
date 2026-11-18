@@ -1,14 +1,15 @@
 //! Reading Wavefront `.obj` files (§ 12): corners (`v`) and faces (`f`), nothing else.
 //!
 //! - Corners are numbered from 1 in the file; the output is 0-based, ready for the GPU.
-//! - Faces with more than 3 corners are fan-triangulated: `a b c d` → `a b c`, `a c d`
-//!   (correct for convex faces; concave ones are the § 17 bonus).
+//! - Faces with more than 3 corners are split by ear clipping (§ 17,
+//!   `triangulate.rs`): correct for concave and bent faces too.
 //! - Every other line (`#`, `o`, `g`, `s`, `mtllib`, `usemtl`, `vt`, `vn`, `l`, …) is skipped.
 //! - A broken file gives an `ObjError` with its line number, never a panic.
 
 use std::fmt;
 
 use crate::maths::Vec3;
+use crate::triangulate::triangulate;
 
 /// A parsed model: corner positions, triangles (0-based corner indices) and the
 /// bounding box around every corner.
@@ -29,6 +30,29 @@ impl ObjModel {
     /// The middle of the bounding box: what the model spins around.
     pub fn centre(&self) -> Vec3 {
         (self.min + self.max) * 0.5
+    }
+
+    /// How many edges belong to only one triangle: borders where the surface is open
+    /// and you can see past it (§ 17). A sealed model has 0. Corners at exactly the same
+    /// position count as one, so seams between separately modelled parts don't count.
+    pub fn open_edges(&self) -> usize {
+        use std::collections::HashMap;
+        // `+ 0.0` turns −0.0 into 0.0: the same point, but a different bit pattern
+        // (teapot.obj writes 86 coordinates as "-0.000000").
+        let bits = |v: f32| (v + 0.0).to_bits();
+        let key = |i: u32| {
+            let p = self.positions[i as usize];
+            [bits(p.x), bits(p.y), bits(p.z)]
+        };
+        let mut uses: HashMap<_, usize> = HashMap::new();
+        for t in &self.triangles {
+            for k in 0..3 {
+                let (a, b) = (key(t[k]), key(t[(k + 1) % 3]));
+                let edge = if a <= b { (a, b) } else { (b, a) };
+                *uses.entry(edge).or_default() += 1;
+            }
+        }
+        uses.values().filter(|&&n| n == 1).count()
     }
 
     /// Half the bounding box's diagonal: a sphere this big around `centre` holds
@@ -108,9 +132,9 @@ pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
                 if corners.len() < 3 {
                     return Err(error(ObjErrorKind::TooFewCorners(corners.len())));
                 }
-                // Fan from the first corner: (c0, c1, c2), (c0, c2, c3), …
-                for pair in corners[1..].windows(2) {
-                    triangles.push([corners[0], pair[0], pair[1]]);
+                // Ear clipping (§ 17); plain triangles come back as they are.
+                for triangle in triangulate(&positions, &corners) {
+                    triangles.push(triangle);
                     triangle_faces.push(face_count);
                 }
                 face_count += 1;
@@ -197,10 +221,25 @@ mod tests {
     }
 
     #[test]
-    fn quad_is_fanned_from_its_first_corner() {
-        // Q-12.2's pattern: f a b c d → (a b c), (a c d), then − 1.
+    fn quad_becomes_two_triangles() {
+        // Since § 17 ear clipping; on a convex face it gives exactly § 12's fan:
+        // (a b c), (a c d), then − 1.
         let model = parse_obj(&format!("{SQUARE}f 4 1 2 3\n")).unwrap();
         assert_eq!(model.triangles, vec![[3, 0, 1], [3, 1, 2]]);
+    }
+
+    #[test]
+    fn open_edges_counted() {
+        // A single square: all 4 outline edges are open (the diagonal is shared).
+        let model = parse_obj(&format!("{SQUARE}f 1 2 3 4\n")).unwrap();
+        assert_eq!(model.open_edges(), 4);
+        // −0 and 0 are the same corner: these two triangles share an edge.
+        let signed_zero =
+            parse_obj("v 0 0 0\nv 1 0 0\nv 0 1 0\nv -0 1 0\nv 1 1 0\nf 1 2 3\nf 4 2 5\n").unwrap();
+        assert_eq!(signed_zero.open_edges(), 4);
+        // A closed cube: none.
+        let read = |n: &str| std::fs::read_to_string(format!("../resources/test/{n}")).unwrap();
+        assert_eq!(parse_obj(&read("cube_vt_vn.obj")).unwrap().open_edges(), 0);
     }
 
     #[test]
@@ -292,6 +331,11 @@ mod tests {
         // 2 hexagons × 4 triangles + 6 quads × 2 = 20, from 8 faces.
         assert_eq!(prism.triangles.len(), 20);
         assert_eq!(prism.triangle_faces.iter().max(), Some(&7));
+        // § 17: concave caps. L prism: 2 caps × 4 + 6 sides × 2 = 20;
+        // star prism: 2 caps × 8 + 10 sides × 2 = 36. Sealed: no open edges.
+        let concave = parse_obj(&read("concave.obj")).unwrap();
+        assert_eq!(concave.triangles.len(), 20 + 36);
+        assert_eq!(concave.open_edges(), 0);
         let err = parse_obj(&read("broken.obj")).unwrap_err();
         assert_eq!(err.line, 7);
         assert!(matches!(

@@ -1,6 +1,6 @@
 # Progress
 
-**Current section:** 16
+**Current section:** 18
 **Last session:** 2026-11-11
 
 ## Sections
@@ -22,8 +22,14 @@
 | 13 | done | passed after misses (Q-13.1: shared corners don't distinguish faces at all — greys bleed from each corner; Q-13.3: held on a toggle flips every frame, not 'spin while held' — both fresh variants passed; Q-13.4: consequence filled in (position gets turned → moves away / orbits); Q-13.5: radius scales *movement*, 0.2 = fraction of model size per second) — checkpoint code by Claude (ObjModel::triangle_faces; grey_faces duplicated corners + face_grey; Placement + 5-card matrix; key controls) verified on Mac (greys, all keys; +/− didn't register on Spanish layout → switched to W/S) ; explain-back passed with misses (old .obj indices on duplicated vertices = in range but wrong corners, silent — not 'running out'; `*p =` writes through the reference; `&mut` = arrow to the original vs no `&` = copy; spin + angles.y: Space stops `spin` growing, nothing resets) | 2026-11-14 | paused | Section written 2026-11-14 |
 | 14 | done | passed after misses (Q-14.4: staging is worth it *because* the CPU writes once; Q-14.5: thought UNORM texture → too dark — it's too pale (no decode in, still encode out = double-encoded); fresh variants passed: SRGB tex + UNORM swapchain = too dark, both UNORM = looks right) — checkpoint code by Claude (tga.rs loader; texture.rs upload + 2 transitions + sampler + set 1 + white texture 0; run_once helper; planar UVs; embedded texture) verified on Mac (owner's reaper-turtle picture upright, correct colours, streaks on thin sides) ; explain-back passed (first_set must match `set = N`; white = 1.0 per channel, neutral when multiplying — not 'the base colour') | 2026-11-15 | paused | Section written 2026-11-15 |
 | 15 | done | passed after misses (Q-15.2: swapped roles — key flips the target, blend steps towards it; Q-15.4: error at pipeline creation, not cmd_push_constants — both fresh variants passed; Q-15.3/15.5 precisions: reverses from where it is; smoothstep changes the pace) — checkpoint code by Claude (push block 68 bytes VERTEX|FRAGMENT, DrawCall, mix in frag, Fade target/progress + clamp + smoothstep, T key) verified on Mac (fades both ways, reverses mid-fade) ; explain-back passed with misses (`+= gap` snaps in one frame — it doesn't overshoot; `+= max_step` is the one that overshoots; easing is applied once on output to a linearly stepped progress) | 2026-11-15 | paused | Section written 2026-11-15 |
-| 16 | gate passed | passed after misses (Q-16.1 needed 'why no pipeline rebuild' — dynamic viewport/scissor; Q-16.2: device_wait_idle = CPU waits for the GPU's queue to drain, it doesn't tell the GPU to stop — fresh variant passed; Q-16.3: decision option C taken (committed .spv fallback + curl LunarG SDK)) — checkpoint code pending | 2026-11-16 | paused | Section written 2026-11-16 |
-| 17–19 | not written | — | | — | Written on arrival |
+| 16 | done | passed after misses (Q-16.1 needed 'why no pipeline rebuild' — dynamic viewport/scissor; Q-16.2: device_wait_idle = CPU waits for the GPU's queue to drain, it doesn't tell the GPU to stop — fresh variant passed; Q-16.3: decision option C taken (committed .spv fallback + curl LunarG SDK)) — checkpoint code by Claude (resize rebuild, build.rs .spv fallback, Makefile + deps.sh, README draft, test .obj files, texture as 2nd argument) verified on Mac and on 42 Madrid campus machines (fresh pull, `make`, nothing to install); README AI section reviewed by owner ; explain-back passed with misses (wait goes before the whole swap because old swapchain/depth are destroyed right after — creating doesn't disturb the queue; fallback only on NotFound so real shader errors aren't hidden) | 2026-11-16 | paused | Section written 2026-11-16 |
+| 17 | done | passed after re-explanations (ear = the triangle that's kept, not discarded — worked through the L-shape by hand, incl. C becoming an ear later; normal/flattening/Newell re-explained from § 9's tabletop; bow-tie isn't a valid face — fan the rest so the loop ends) — checkpoint code by Claude (triangulate.rs: Newell → flatten → ear clipping → fan fallback, search from corner 1 = old fan on convex faces; ObjModel::open_edges with −0.0 = 0.0; concave.obj) verified on Mac (L and star caps clean; teapots 160 open edges each) ; explain-back passed. Found: teapot.obj writes 86 coords as -0.000000 (likely cause of other renderers' edge artifacts). Also fixed: Makefile `TEX` clashed with make's built-in → `TEXTURE` | 2026-11-18 | paused | Teapot: both files render the same; lid slit confirmed independently in macOS Quick Look |
+| 18 | in-progress | — | 2026-11-18 | paused | Section written; scope (owner): stretch fix + picture per object + view modes + zoom |
+| 19 | not written | — | | — | Extras picked 2026-11-18: FPS in the title, drop a `.obj` to load it, debug colour modes (facing / depth) |
+| 20 | not written | — | | — | Extras picked 2026-11-18: Mouse orbit camera; one directional light shading faces by angle |
+| 21 | not written | — | | — | Extras picked 2026-11-18: Edit a shader, see it change without restarting |
+| 22 | not written | — | | — | Extras picked 2026-11-18: Hundreds of spinning logos from one mesh and one draw |
+| 23 | not written | — | | — | Extras picked 2026-11-18: Cube-map skybox, plus a chrome (reflective) mode |
 
 ## Prerequisite audit (2026-11-02)
 - Rust: new. C/C++ and pointers: known.
@@ -39,6 +45,7 @@
 
 | Question | Source | Clean recalls | Next due |
 |---|---|---|---|
+| Ear clipping: what an ear is, the two tests (turns outwards; no other corner inside), every cut piece + the last triangle is drawn — fresh variant | § 17 | 0 | after § 19 |
 | device_wait_idle: who waits for what (CPU waits until the GPU's submitted work is done) — fresh variant | § 16 | 0 | after § 18 |
 | Target vs value: the key flips the target, the value steps towards it each frame (reversible, no jump) — fresh variant | § 15 | 0 | after § 17 |
 | sRGB: decode on texture read (darkens) + encode on swapchain write (brightens) must pair up — fresh variant | § 14 | 0 | after § 16 |
@@ -90,4 +97,4 @@
 - § 1 weak spots: dangling raw pointer from a dropped local; drop order of locals vs struct fields.
 - ✅ 2026-11-07: `vkcube` runs on the 42 Madrid campus machines.
 - MoltenVK reports **Vulkan 1.2.357** on the M2. Decided 2026-11-07: dynamic rendering (via `VK_KHR_dynamic_rendering`) — see DECISIONS.md.
-- Bonus extras (§ 19): deliberately undecided.
+- 2026-11-18: extras chosen by owner (from a list of 10): FPS counter, drag & drop, debug colours (§ 19); orbit camera + lighting (§ 20); shader hot-reload (§ 21); instancing (§ 22); skybox + reflections (§ 23). Not picked: `.mtl` colours, screenshot to TGA. Each is engine groundwork for the group projects.

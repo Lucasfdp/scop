@@ -53,10 +53,20 @@
       "name": "6 · Bonus",
       "sections": [
         17,
-        18,
-        19
+        18
       ],
-      "description": "Complex .obj, texture mapping without stretching, own extras"
+      "description": "Complex .obj, texture mapping without stretching (with picture per object, view modes, zoom)"
+    },
+    {
+      "name": "7 · Engine extras",
+      "sections": [
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "description": "FPS, drag & drop, debug colours, orbit camera, lighting, shader hot-reload, instancing, skybox — groundwork for the next projects"
     }
   ],
   "areas": {
@@ -74,7 +84,11 @@
       12,
       14,
       17,
-      18
+      18,
+      20,
+      21,
+      22,
+      23
     ],
     "scop": [
       1,

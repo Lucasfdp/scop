@@ -240,9 +240,10 @@ fn main() -> ExitCode {
         }
     };
     println!(
-        "{path}: {} corners, {} triangles",
+        "{path}: {} corners, {} triangles, {} open edges",
         obj.positions.len(),
-        obj.triangles.len()
+        obj.triangles.len(),
+        obj.open_edges() // 0 = sealed; more = the surface has gaps you can see past (§ 17)
     );
 
     // The picture: a .tga given as 2nd argument, or the embedded one (§ 14).
