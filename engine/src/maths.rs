@@ -228,6 +228,23 @@ impl Mat4 {
         ])
     }
 
+    /// View card (§ 20): a camera standing at `eye`, looking at `target`, with `up`
+    /// roughly its up. The result puts the camera at the origin looking down −z,
+    /// like every view so far. Given, not derived (owner's choice); the tests show
+    /// what it does. `up` must not point along the view direction (that's the flip
+    /// the pitch clamp prevents, Q-20.2).
+    pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> Self {
+        let forward = (target - eye).normalise();
+        let right = forward.cross(up).normalise();
+        let true_up = right.cross(forward);
+        Mat4::from_rows([
+            [right.x, right.y, right.z, -right.dot(eye)],
+            [true_up.x, true_up.y, true_up.z, -true_up.dot(eye)],
+            [-forward.x, -forward.y, -forward.z, forward.dot(eye)],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+    }
+
     /// Perspective card, Vulkan flavour. `fov_y` in radians, `aspect` =
     /// width ÷ height, `near`/`far` = positive distances in front of the camera.
     ///
@@ -351,6 +368,38 @@ mod tests {
     }
 
     // --- Mat4: the cards ---
+
+    #[test]
+    fn look_at_from_the_front_is_the_old_fixed_camera() {
+        // § 12–19's camera: 5 back along +z, looking at the origin = translation(0,0,−5).
+        let view = Mat4::look_at(
+            Vec3::new(0.0, 0.0, 5.0),
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let old = Mat4::translation(Vec3::new(0.0, 0.0, -5.0));
+        let p = Vec4::new(1.0, 2.0, 3.0, 1.0);
+        assert_vec4(view * p, old * p);
+    }
+
+    #[test]
+    fn look_at_puts_the_target_straight_ahead_and_keeps_up_up() {
+        // A camera up and to the side, looking at a point that isn't the origin.
+        let eye = Vec3::new(4.0, 3.0, -2.0);
+        let target = Vec3::new(1.0, 1.0, 1.0);
+        let view = Mat4::look_at(eye, target, Vec3::new(0.0, 1.0, 0.0));
+        let distance = (target - eye).length();
+        // The target lands straight ahead: x = y = 0, z = −distance.
+        assert_vec3(
+            (view * Vec4::point(target)).xyz(),
+            Vec3::new(0.0, 0.0, -distance),
+        );
+        // The eye itself lands on the origin.
+        assert_vec3((view * Vec4::point(eye)).xyz(), Vec3::ZERO);
+        // A point just above the target is above it on screen (y > 0), not to the side.
+        let above = (view * Vec4::point(target + Vec3::new(0.0, 0.5, 0.0))).xyz();
+        assert!(above.y > 0.0 && close(above.x, 0.0), "{above:?}");
+    }
 
     #[test]
     fn identity_changes_nothing() {

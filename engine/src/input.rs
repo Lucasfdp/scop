@@ -104,11 +104,32 @@ impl Key {
     }
 }
 
+/// The mouse buttons the engine passes on to apps (§ 20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+impl MouseButton {
+    /// Translates a `winit` button; `None` for extra buttons the engine ignores.
+    pub(crate) fn from_winit(button: winit::event::MouseButton) -> Option<MouseButton> {
+        use winit::event::MouseButton as W;
+        match button {
+            W::Left => Some(MouseButton::Left),
+            W::Right => Some(MouseButton::Right),
+            W::Middle => Some(MouseButton::Middle),
+            _ => None,
+        }
+    }
+}
+
 /// How many trackpad pixels count as one mouse-wheel notch (§ 18: *scroll delta*).
 /// Mice report notches ("lines"); trackpads report pixels, many per gesture.
 const PIXELS_PER_LINE: f32 = 40.0;
 
-/// Keyboard and mouse-wheel state for one frame.
+/// Keyboard and mouse state for one frame.
 #[derive(Debug, Default)]
 pub struct Input {
     held: HashSet<Key>,
@@ -117,6 +138,12 @@ pub struct Input {
     scroll: f32,
     /// Files dropped on the window since the last frame (§ 19).
     dropped: Vec<PathBuf>,
+    /// Mouse buttons down right now (§ 20).
+    buttons: HashSet<MouseButton>,
+    /// Where the cursor was last seen, in window pixels; `None` = outside the window.
+    cursor: Option<(f32, f32)>,
+    /// How far the cursor moved since the last frame, in pixels.
+    motion: (f32, f32),
 }
 
 impl Input {
@@ -136,6 +163,44 @@ impl Input {
     /// to notches too, so one number works for both.
     pub fn scroll(&self) -> f32 {
         self.scroll
+    }
+
+    /// Is mouse `button` down right now? (§ 20: drag = held + `mouse_delta`.)
+    pub fn mouse_held(&self, button: MouseButton) -> bool {
+        self.buttons.contains(&button)
+    }
+
+    /// How far the cursor moved since the last frame, in pixels: (right, down).
+    /// The movement, not the position — so a drag turns things by how far you drag,
+    /// wherever on the window it starts (§ 20, *mouse delta*).
+    pub fn mouse_delta(&self) -> (f32, f32) {
+        self.motion
+    }
+
+    pub(crate) fn mouse_down(&mut self, button: MouseButton) {
+        self.buttons.insert(button);
+    }
+
+    pub(crate) fn mouse_up(&mut self, button: MouseButton) {
+        self.buttons.remove(&button);
+    }
+
+    /// The cursor is now at (x, y). The movement counts from where it was last seen;
+    /// the first position after entering the window only sets the start, so the
+    /// camera never jumps.
+    pub(crate) fn cursor_moved(&mut self, x: f32, y: f32) {
+        if let Some((last_x, last_y)) = self.cursor {
+            self.motion.0 += x - last_x;
+            self.motion.1 += y - last_y;
+        }
+        self.cursor = Some((x, y));
+    }
+
+    /// The cursor left the window: forget where it was, and release the buttons
+    /// (their "up" may happen outside, where the window never hears about it).
+    pub(crate) fn cursor_left(&mut self) {
+        self.cursor = None;
+        self.buttons.clear();
     }
 
     /// Files dragged onto the window since the last frame, in the order they
@@ -175,6 +240,7 @@ impl Input {
         self.pressed.clear();
         self.scroll = 0.0;
         self.dropped.clear();
+        self.motion = (0.0, 0.0);
     }
 }
 
@@ -193,6 +259,24 @@ mod tests {
         assert!(!input.pressed(Key::Space) && input.held(Key::Space));
         input.key_up(Key::Space);
         assert!(!input.held(Key::Space));
+    }
+
+    #[test]
+    fn mouse_delta_is_movement_and_never_jumps() {
+        let mut input = Input::default();
+        input.cursor_moved(100.0, 100.0); // first sight: only sets the start
+        assert_eq!(input.mouse_delta(), (0.0, 0.0));
+        input.cursor_moved(110.0, 95.0);
+        input.cursor_moved(115.0, 95.0); // several moves in one frame add up
+        assert_eq!(input.mouse_delta(), (15.0, -5.0));
+        input.end_frame();
+        assert_eq!(input.mouse_delta(), (0.0, 0.0)); // one frame only
+        // Leaves at one side, comes back at the other: no 500-pixel jump.
+        input.mouse_down(MouseButton::Left);
+        input.cursor_left();
+        assert!(!input.mouse_held(MouseButton::Left)); // released when it left
+        input.cursor_moved(615.0, 95.0);
+        assert_eq!(input.mouse_delta(), (0.0, 0.0));
     }
 
     #[test]

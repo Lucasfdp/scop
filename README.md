@@ -59,8 +59,10 @@ make run OBJ=resources/test/concave.obj TEXTURE="a.tga b.tga"  # one picture per
 | V | solid → wireframe → points |
 | C | colours: normal → facing (blue front, red back) → depth (near white, far dark) |
 | mouse wheel, Z / X | zoom in / out (narrows the field of view; the camera stays put) |
+| mouse drag | orbit the camera round the model |
+| B | light on / off (one sun-like light, fixed in the world) |
 | Space | pause / resume the automatic spin |
-| R | reset position, rotation and zoom |
+| R | reset position, rotation, zoom and camera |
 | Esc | quit |
 
 Drop a `.obj` file on the window to open it; a broken file is reported in the terminal
@@ -104,6 +106,8 @@ takes the next picture in turn. Pictures must be 24- or 32-bit TGA
 - Solid, wireframe and point views; zoom by field of view.
 - Frame rate in the title, drag & drop to open models, debug colours (which side of each
   face is showing, and distance from the camera).
+- Mouse orbit camera; one directional light with flat shading (off until B, so the
+  mandatory greys are unchanged).
 - Depth buffer, window resizing, validation-layer-clean in debug builds.
 - Every real decision — what was chosen, what was rejected and why — is in
   [`DECISIONS.md`](DECISIONS.md).
@@ -141,7 +145,8 @@ recorded in [`DECISIONS.md`](DECISIONS.md) (2026-11-03).
   synchronisation, pipeline and shader loading, buffers, the maths library,
   uniforms and descriptors, depth buffer, the `.obj` parser, greys and controls, the TGA
   loader and textures, the fade, window resizing, the bonus (ear clipping, box mapping,
-  a picture per object, view modes, zoom, FPS, drag & drop, debug colours) — plus the unit tests, the `Makefile`
+  a picture per object, view modes, zoom, FPS, drag & drop, debug colours, orbit camera,
+  lighting) — plus the unit tests, the `Makefile`
   and `scripts/deps.sh`.
 - **Mine.** The choices (Rust + Vulkan, the engine/app split, and each decision in
   `DECISIONS.md`, picked from the trade-offs Claude laid out), running and checking every

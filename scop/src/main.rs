@@ -7,8 +7,8 @@ use std::process::ExitCode;
 
 use engine::{
     App, DrawStyle, Flow, FpsCounter, FpsReading, Frame, Gfx, GpuInfo, Image, Input, Key, Mat4,
-    MeshData, MeshId, ObjModel, PipelineId, RunError, Shaders, TextureId, Vec3, Vertex,
-    WindowConfig,
+    MeshData, MeshId, MouseButton, ObjModel, PipelineId, RunError, Shaders, TextureId, Vec3,
+    Vertex, WindowConfig,
 };
 
 /// The mesh shaders, compiled by `build.rs` and embedded in the binary.
@@ -40,6 +40,14 @@ const FOV_MAX_DEGREES: f32 = 100.0;
 const ZOOM_PER_NOTCH: f32 = 0.9;
 /// Z / X held: how many notches' worth of zoom per second.
 const ZOOM_KEY_NOTCHES_PER_SECOND: f32 = 6.0;
+/// Orbit camera (§ 20): how far one pixel of mouse drag turns the camera, in radians.
+const ORBIT_RADIANS_PER_PIXEL: f32 = 0.005;
+/// The pitch clamp (Q-20.2): just short of straight up / down, so the camera never flips.
+const PITCH_LIMIT: f32 = 89.0 * std::f32::consts::PI / 180.0;
+/// The light (§ 20): the way it shines — from above, front-left, towards the model.
+/// Fixed in the world: orbiting doesn't move it (Q-20.1).
+const LIGHT_DIRECTION: Vec3 = Vec3::new(1.0, -1.0, -1.0);
+
 /// How often the FPS in the title is updated, in seconds (§ 19, Q-19.2).
 const FPS_WINDOW: f32 = 0.5;
 /// What C cycles through (§ 19). The index is what the fragment shader gets.
@@ -65,10 +73,47 @@ controls:
   V           solid → wireframe → points
   C           colours: normal → facing → depth
   wheel, Z/X  zoom in / out (field of view)
+  mouse drag  orbit the camera round the model
+  B           light on / off
   Space       pause / resume the automatic spin
   R           reset (placement and zoom)
   Esc         quit
   drop a .obj on the window to open it";
+
+/// Where the camera stands on its sphere round the model (§ 20). The distance isn't
+/// here: it's the framing distance (§ 12), so the orbit always fits the model.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Orbit {
+    /// Round the model (left / right), in radians. 0 = in front, on +z.
+    yaw: f32,
+    /// Over / under the model, in radians, kept within ±`PITCH_LIMIT`.
+    pitch: f32,
+}
+
+impl Orbit {
+    /// In front of the model, level with it: the same view as before § 20.
+    const START: Orbit = Orbit {
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+
+    /// A mouse drag of (dx, dy) pixels. Like grabbing the model: drag right and it
+    /// turns right (the camera walks left), drag down and the camera climbs.
+    fn drag(&mut self, dx: f32, dy: f32) {
+        self.yaw -= dx * ORBIT_RADIANS_PER_PIXEL;
+        self.pitch = (self.pitch + dy * ORBIT_RADIANS_PER_PIXEL).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+    }
+
+    /// Where the camera stands: `distance` from the origin (the model's centre).
+    fn eye(&self, distance: f32) -> Vec3 {
+        let level = distance * self.pitch.cos(); // how far out, seen from above
+        Vec3::new(
+            level * self.yaw.sin(),
+            distance * self.pitch.sin(),
+            level * self.yaw.cos(),
+        )
+    }
+}
 
 /// Where the model is and how it's turned (§ 13: *model state*). Keys change these
 /// numbers in `update`; `draw` builds the model matrix from them.
@@ -178,6 +223,10 @@ struct Scop {
     fps_reading: Option<FpsReading>,
     /// Index into `COLOUR_MODES` (C).
     colour_mode: usize,
+    /// § 20: the camera's place on its orbit (mouse drag).
+    orbit: Orbit,
+    /// § 20: B. Off at the start, so the mandatory greys look exactly as before.
+    light_on: bool,
 }
 
 /// A model read from a file and turned into meshes, but not uploaded yet (§ 19).
@@ -265,6 +314,7 @@ impl Scop {
         // A new model starts like scop does: placed, unzoomed. Pictures, view and
         // colour mode stay as they were.
         self.placement = Placement::START;
+        self.orbit = Orbit::START;
         self.fov_y = FOV_Y_DEGREES;
         Ok(())
     }
@@ -285,11 +335,9 @@ fn window_title(name: &str, reading: Option<FpsReading>) -> String {
 }
 
 /// The model's nearest and farthest distance from the camera, for depth mode (§ 19).
-/// `distance` = camera to the model's centre at the start; W / S move the model by
-/// `position_z` towards the camera. Turning doesn't matter: the model always fits in a
-/// sphere of `radius` around its centre.
-fn depth_range(distance: f32, position_z: f32, radius: f32) -> (f32, f32) {
-    let centre = distance - position_z;
+/// `centre` = camera to the model's centre, wherever either has moved (W / S, the
+/// orbit). Turning doesn't matter: the model always fits in a sphere of `radius`.
+fn depth_range(centre: f32, radius: f32) -> (f32, f32) {
     ((centre - radius).max(0.0), centre + radius)
 }
 
@@ -335,6 +383,14 @@ impl App for Scop {
             self.colour_mode = (self.colour_mode + 1) % COLOUR_MODES.len();
             println!("colours: {}", COLOUR_MODES[self.colour_mode]);
         }
+        // § 20: drag with the left button to orbit; B switches the light.
+        if input.mouse_held(MouseButton::Left) {
+            let (dx, dy) = input.mouse_delta();
+            self.orbit.drag(dx, dy);
+        }
+        if input.pressed(Key::B) {
+            self.light_on = !self.light_on;
+        }
         let p = &mut self.placement;
 
         // Toggles: `pressed`, so one press = one switch (Q-13.3).
@@ -343,6 +399,7 @@ impl App for Scop {
         }
         if input.pressed(Key::R) {
             *p = Placement::START;
+            self.orbit = Orbit::START;
             self.fov_y = FOV_Y_DEGREES;
         }
         if input.pressed(Key::N) {
@@ -398,8 +455,12 @@ impl App for Scop {
         // Camera, once per frame (the noticeboard). Aspect is read fresh every frame.
         // The zoom only changes the lens (§ 18): same camera, narrower view.
         let projection = Mat4::perspective(self.fov_y.to_radians(), frame.aspect(), near, far);
-        let view = Mat4::translation(Vec3::new(0.0, 0.0, -distance));
+        // § 20: the camera stands on its orbit and looks at the origin, where the
+        // model's centre starts. Up = +y (the pitch clamp keeps that meaningful).
+        let eye = self.orbit.eye(distance);
+        let view = Mat4::look_at(eye, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0));
         frame.set_camera(projection * view);
+        frame.set_light(LIGHT_DIRECTION, if self.light_on { 1.0 } else { 0.0 });
 
         // The model's placement (the sticky note): one for the whole file, so the
         // objects keep their places relative to each other.
@@ -408,7 +469,8 @@ impl App for Scop {
             return;
         };
         // § 19: the four push params, in the order the fragment shader reads them.
-        let (nearest, farthest) = depth_range(distance, self.placement.position.z, radius);
+        let to_centre = (self.placement.position - eye).length();
+        let (nearest, farthest) = depth_range(to_centre, radius);
         let params = [
             self.fade.blend(),
             self.colour_mode as f32,
@@ -501,6 +563,8 @@ fn main() -> ExitCode {
         fps: FpsCounter::new(FPS_WINDOW),
         fps_reading: None,
         colour_mode: 0,
+        orbit: Orbit::START,
+        light_on: false,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -559,12 +623,15 @@ fn object_meshes(obj: &ObjModel) -> Vec<MeshData> {
             {
                 let grey = face_grey(face);
                 let normal = normals[face as usize];
+                // § 20: flat shading — every corner of the face carries its normal.
+                let unit = normal.normalise();
                 for &corner in triangle {
                     let p = obj.positions[corner as usize];
                     vertices.push(Vertex {
                         position: [p.x, p.y, p.z],
                         colour: [grey, grey, grey],
                         uv: box_uv(p, normal, min, max),
+                        normal: [unit.x, unit.y, unit.z],
                     });
                 }
             }
@@ -827,11 +894,55 @@ mod tests {
     #[test]
     fn depth_range_follows_the_model() {
         // Centre 10 away, radius 2: nearest point 8, farthest 12.
-        assert_eq!(depth_range(10.0, 0.0, 2.0), (8.0, 12.0));
-        // W moved it 3 closer: the whole range comes 3 closer.
-        assert_eq!(depth_range(10.0, 3.0, 2.0), (5.0, 9.0));
+        assert_eq!(depth_range(10.0, 2.0), (8.0, 12.0));
+        // Moved 3 closer (W, or the orbit): the whole range comes 3 closer.
+        assert_eq!(depth_range(7.0, 2.0), (5.0, 9.0));
         // Pushed right up to the camera: never a negative distance.
-        assert_eq!(depth_range(10.0, 9.0, 2.0).0, 0.0);
+        assert_eq!(depth_range(1.0, 2.0).0, 0.0);
+    }
+
+    #[test]
+    fn orbit_starts_in_front_and_never_goes_over_the_top() {
+        // Start: straight in front, on +z — the pre-§ 20 camera.
+        let eye = Orbit::START.eye(5.0);
+        assert!((eye.z - 5.0).abs() < 1e-5 && eye.x.abs() < 1e-5 && eye.y.abs() < 1e-5);
+        // Drag a long way down (camera climbs): stops at the clamp, never past it.
+        let mut orbit = Orbit::START;
+        orbit.drag(0.0, 100_000.0);
+        assert_eq!(orbit.pitch, PITCH_LIMIT);
+        orbit.drag(0.0, -200_000.0);
+        assert_eq!(orbit.pitch, -PITCH_LIMIT);
+        // Wherever it stands, the camera stays at the framing distance.
+        orbit.drag(1234.0, 3000.0);
+        assert!((orbit.eye(5.0).length() - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn drag_right_walks_the_camera_left() {
+        // Like grabbing the model and turning it right: the camera ends up on −x.
+        let mut orbit = Orbit::START;
+        orbit.drag(100.0, 0.0);
+        assert!(orbit.eye(5.0).x < 0.0);
+    }
+
+    #[test]
+    fn normals_are_unit_length_and_point_outwards() {
+        // § 20: on a closed cube every face's normal points away from the centre.
+        let text = std::fs::read_to_string("../resources/test/cube_vt_vn.obj").unwrap();
+        let obj = engine::parse_obj(&text).unwrap();
+        let centre = obj.centre();
+        for mesh in object_meshes(&obj) {
+            for corners in mesh.vertices.chunks_exact(3) {
+                let [nx, ny, nz] = corners[0].normal;
+                let n = Vec3::new(nx, ny, nz);
+                assert!((n.length() - 1.0).abs() < 1e-5);
+                // Flat: all three corners carry the same normal.
+                assert!(corners.iter().all(|c| c.normal == corners[0].normal));
+                let [px, py, pz] = corners[0].position;
+                let outwards = Vec3::new(px, py, pz) - centre;
+                assert!(n.dot(outwards) > 0.0, "inward normal {n:?}");
+            }
+        }
     }
 
     #[test]

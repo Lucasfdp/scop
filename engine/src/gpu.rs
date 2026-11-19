@@ -488,7 +488,8 @@ impl GpuContext {
 
             // 1b. Only now is this slot's camera buffer free: the GPU has finished the
             //     last frame that read it (Q-10.2). Write this frame's camera.
-            self.inputs.write_camera(slot_index, frame.camera);
+            self.inputs
+                .write_camera(slot_index, frame.camera, frame.light);
 
             // 2. Which image do we draw into? `image_free` is raised once it's off screen.
             let acquired = self.swapchain_loader.acquire_next_image(

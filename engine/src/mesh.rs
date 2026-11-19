@@ -21,6 +21,8 @@ pub struct Vertex {
     pub colour: [f32; 3],
     /// Where this corner sits on the texture (§ 14): U across, V down, 0.0–1.0.
     pub uv: [f32; 2],
+    /// Which way the surface points at this corner, length 1 (§ 20: lighting).
+    pub normal: [f32; 3],
 }
 
 impl Vertex {
@@ -34,7 +36,7 @@ impl Vertex {
     }
 
     /// The packing list: which bytes of a vertex feed which shader `location`.
-    pub(crate) fn attributes() -> [vk::VertexInputAttributeDescription; 3] {
+    pub(crate) fn attributes() -> [vk::VertexInputAttributeDescription; 4] {
         [
             vk::VertexInputAttributeDescription {
                 location: 0,
@@ -53,6 +55,12 @@ impl Vertex {
                 binding: 0,
                 format: vk::Format::R32G32_SFLOAT, // vec2
                 offset: offset_of!(Vertex, uv) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 3,
+                binding: 0,
+                format: vk::Format::R32G32B32_SFLOAT, // vec3
+                offset: offset_of!(Vertex, normal) as u32,
             },
         ]
     }
@@ -107,11 +115,13 @@ mod tests {
 
     #[test]
     fn vertex_layout_matches_the_description() {
-        // 3 + 3 + 2 floats, no padding: 32 bytes; colour at byte 12, uv at byte 24.
-        assert_eq!(Vertex::binding().stride, 32);
-        let [position, colour, uv] = Vertex::attributes();
+        // 3 + 3 + 2 + 3 floats, no padding: 44 bytes; colour at byte 12, uv at 24,
+        // normal at 32 (§ 20).
+        assert_eq!(Vertex::binding().stride, 44);
+        let [position, colour, uv, normal] = Vertex::attributes();
         assert_eq!(position.offset, 0);
         assert_eq!(colour.offset, 12);
         assert_eq!((uv.location, uv.offset), (2, 24));
+        assert_eq!((normal.location, normal.offset), (3, 32));
     }
 }

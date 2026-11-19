@@ -15,7 +15,7 @@ use winit::window::{Window, WindowId};
 
 use crate::app::{App, Flow, Frame, Gfx};
 use crate::gpu::{FrameStatus, GpuContext, GpuError};
-use crate::input::{Input, Key};
+use crate::input::{Input, Key, MouseButton};
 
 /// What the app asks for when opening a window.
 pub struct WindowConfig {
@@ -247,6 +247,19 @@ impl<A: App> ApplicationHandler for Runner<A> {
                 MouseScrollDelta::LineDelta(_, lines) => self.input.scroll_lines(lines),
                 MouseScrollDelta::PixelDelta(pixels) => self.input.scroll_pixels(pixels.y as f32),
             },
+            // § 20: the mouse — buttons, and the cursor for drag movement.
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(button) = MouseButton::from_winit(button) {
+                    match state {
+                        ElementState::Pressed => self.input.mouse_down(button),
+                        ElementState::Released => self.input.mouse_up(button),
+                    }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => self
+                .input
+                .cursor_moved(position.x as f32, position.y as f32),
+            WindowEvent::CursorLeft { .. } => self.input.cursor_left(),
             // § 19: one event per file dragged onto the window.
             WindowEvent::DroppedFile(path) => self.input.drop_file(path),
             WindowEvent::KeyboardInput {

@@ -2,7 +2,7 @@
 section: 20
 slug: bonus-camera-and-lighting
 tier: T1
-status: in-progress
+status: done
 prereqs: [10, 13, 18, 19]
 terms: [orbit camera, yaw and pitch, pitch clamp, look-at, mouse delta, directional light, normal, flat shading, diffuse, ambient, world-fixed light, normal transform]
 ---

@@ -4,7 +4,7 @@
 
 use crate::gpu::GpuContext;
 use crate::input::Input;
-use crate::maths::Mat4;
+use crate::maths::{Mat4, Vec3};
 use crate::mesh::MeshData;
 use crate::pipeline::{DrawStyle, Shaders};
 use crate::platform::RunError;
@@ -137,6 +137,8 @@ pub struct Frame {
     pub(crate) draws: Vec<DrawCall>,
     /// The window title the app asked for this frame, if any (§ 19).
     pub(crate) title: Option<String>,
+    /// The light (§ 20): direction it shines in (xyz) and strength (w). Default: off.
+    pub(crate) light: [f32; 4],
 }
 
 impl Frame {
@@ -148,6 +150,7 @@ impl Frame {
             camera: Mat4::IDENTITY,
             draws: Vec::new(),
             title: None,
+            light: [0.0; 4],
         }
     }
 
@@ -167,6 +170,15 @@ impl Frame {
     /// it to the window when the text actually changes (title throttling).
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.title = Some(title.into());
+    }
+
+    /// One directional light for this frame (§ 20), like the sun: `direction` is the
+    /// way it shines (from the light towards the scene, any length), `strength` 0..1,
+    /// 0 = off. It reaches the shaders with the camera, as `camera.light`; what the
+    /// shaders do with it is the app's choice. Default: off.
+    pub fn set_light(&mut self, direction: Vec3, strength: f32) {
+        let d = direction.normalise();
+        self.light = [d.x, d.y, d.z, strength.clamp(0.0, 1.0)];
     }
 
     /// Background colour (linear RGBA, 0.0–1.0). Default: black.

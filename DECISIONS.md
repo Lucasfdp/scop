@@ -289,3 +289,20 @@ after scop's debug modes (couples the engine to scop); `gl_FragCoord.z` (non-lin
 block, § 9 `w`) and leaves the engine more general, not more scop-shaped.
 **Cost accepted:** a short pause on every drop; `update` now takes a third argument in every app.
 **Revisit if:** meshes are swapped every frame (ft_vox chunks) → a per-frame-slot deletion queue.
+
+## 2026-11-19 — § 20: orbit camera and one directional light
+**Chose:** mouse-drag orbit (yaw, pitch clamped ±89°, distance = framing distance) with
+`Mat4::look_at` in the engine; keys still turn the model. One world-fixed directional light,
+carried in the camera uniform (`view_proj + vec4 light`, 80 bytes, now visible to the fragment
+stage), set with `Frame::set_light`; strength 0 = unlit, so apps that never set it look as
+before. `Vertex` gains a flat per-face normal (location 3); normals turned by `mat3(model)`.
+Ambient 0.25. Light **off by default** (B), so the mandatory greys are untouched for evaluation.
+**Rejected:** quaternion free rotation (ft_newton); wheel as camera distance (wheel is zoom);
+a headlight (orbiting wouldn't show any change); more push params (full since § 19, and the
+light is per frame); smooth normals; the inverse-transpose for normals (scop never stretches).
+**Why:** owner has built both before (rubik, cubed) and wanted them working, not derived (§ 20
+lowered to T1, no maths). Each piece is tested: `look_at` against the old fixed camera, the
+clamp, outward unit normals on the cube.
+**Cost accepted:** teapot looks faceted; no shadows; mouse sensitivity in physical pixels (a
+Retina screen turns half as far per inch of drag).
+**Revisit if:** stretched models (use the inverse-transpose), or smooth shading is wanted.
