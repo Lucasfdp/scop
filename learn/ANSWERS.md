@@ -607,3 +607,28 @@ at least dimly visible.
 face's normal, so the whole face has one brightness and edges stay crisp. Shared corners belong to
 several faces at once, so they'd need one **averaged** normal — brightness would blend across
 edges: **smooth shading**, rounded-looking, wrong for the logo's sharp corners.
+
+## Section 21
+
+**A-21.1** Vulkan only accepts **SPIR-V** (§ 6), never GLSL text. Something has to translate the
+`.frag` into SPIR-V first — at build time that's `build.rs`; for hot reload it's the same `glslc`,
+run while scop is running.
+
+**A-21.2** So a failure costs nothing: if the new shader doesn't compile or the pipeline can't be
+built, the **old pipelines are still there** and scop keeps drawing with them. Destroying first would
+leave scop with nothing to draw with (the same rule as dropping a model in § 19).
+
+**A-21.3** **Screen: unchanged** — the old shaders keep running. **Terminal: `glslc`'s error**, with the
+file and line of the problem. Fix and save → the next check sees a newer modification time, compiles,
+swaps, and prints "shaders reloaded".
+
+**A-21.4** It breaks the **shader contract**: the shader now expects a vertex input at location 4, but
+the Rust side's vertex layout (§ 7) has nothing there — validation reports the missing input (without
+validation, the values are undefined). Hot reload can't add data the Rust side doesn't send: it needs
+a `tangent` field in `Vertex`, a 5th attribute, the data filled in by scop — and a rebuild and restart.
+
+**A-21.5** A pipeline id means "scop's solid (wireframe, points) pipeline", not "this exact version":
+scop *wants* every later draw to use the new one, without updating its tickets. Nothing can draw the
+old one by mistake — it's destroyed only after the GPU finished with it, and nobody holds a separate id
+for it. In § 19 the slot couldn't be reused because a *different* mesh could have appeared under an old
+id: wrong shape, no error. Here it's the same thing, updated.

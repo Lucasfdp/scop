@@ -1499,3 +1499,27 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### normal transform
 **Plain:** turning normals with the model's rotation (the model matrix without its move).
 **Introduced in:** § 20
+
+### hot reload
+**Plain:** replacing part of a running program (its shaders) without restarting it.
+**Introduced in:** § 21
+
+### runtime shader compile
+**Plain:** running `glslc` from inside scop and reading the SPIR-V it outputs.
+**Introduced in:** § 21
+
+### modification time
+**Plain:** when a file was last written (mtime); saving changes it, reading doesn't.
+**Introduced in:** § 21
+
+### polling
+**Plain:** checking repeatedly whether something changed, instead of being told.
+**Introduced in:** § 21
+
+### pipeline swap
+**Plain:** build the new pipeline, wait for the GPU, destroy the old one, reuse its slot and id.
+**Introduced in:** § 21
+
+### shader contract
+**Plain:** what a shader expects from the Rust side (vertex inputs, blocks, textures); hot reload works inside it only.
+**Introduced in:** § 21
