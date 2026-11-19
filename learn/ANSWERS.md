@@ -632,3 +632,27 @@ scop *wants* every later draw to use the new one, without updating its tickets. 
 old one by mistake — it's destroyed only after the GPU finished with it, and nobody holds a separate id
 for it. In § 19 the slot couldn't be reused because a *different* mesh could have appeared under an old
 id: wrong shape, no error. Here it's the same thing, updated.
+
+## Section 22
+
+**A-22.1** It saves the **repeating**: recording 512 sets of bind / push / draw commands on the CPU,
+and the GPU's start-up cost for 512 draws — it's one command saying "512 copies". It does **not**
+save the drawing: the GPU still runs the vertex shader for every corner of every copy and fills
+every triangle (512 × the mesh).
+
+**A-22.2** **Too big for the push block**: it holds about one matrix (128 bytes guaranteed), and 512
+matrices are 32 KB — a buffer the shader reads like an array. **One per frame slot** because the CPU
+rewrites the list every frame while the GPU may still be reading last frame's (§ 10): a shared list
+would make copies jump or flicker, silently.
+
+**A-22.3** It's drawn with the **first crowd copy's matrix** instead of the identity: shrunk to the
+size of one copy, moved to a corner of the grid, turning on its own — because ordinary draws read
+position 0, and position 0 is no longer "change nothing".
+
+**A-22.4** No. The **vsync cap** (§ 19): FIFO waits for the screen, so the title can't show more than
+60 whether the frame took 2 ms or 15 ms of real work. The GPU is drawing 512 × the teapot's triangles;
+to see the cost, compare frame times without the cap, or watch for the number dropping *below* 60.
+
+**A-22.5** The vertex shader turns each normal by the **whole** model for that copy — sticky note ×
+the copy's own matrix — the same combined card that places its corners. So each copy's normals turn
+with it, and the unchanged light code (§ 20) sees the right direction for every face of every copy.

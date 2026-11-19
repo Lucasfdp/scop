@@ -1523,3 +1523,35 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### shader contract
 **Plain:** what a shader expects from the Rust side (vertex inputs, blocks, textures); hot reload works inside it only.
 **Introduced in:** § 21
+
+### draw call
+**Plain:** one "draw this mesh" command recorded into the command buffer.
+**Introduced in:** § 22
+
+### instancing
+**Plain:** drawing one mesh many times with a single draw call.
+**Introduced in:** § 22
+
+### instance
+**Plain:** one copy in an instanced draw.
+**Introduced in:** § 22
+
+### instance index
+**Plain:** which copy the vertex shader is working on (`gl_InstanceIndex`).
+**Introduced in:** § 22
+
+### first instance
+**Plain:** where in the instance list a draw's copies start (ordinary draws: 0, the identity).
+**Introduced in:** § 22
+
+### instance buffer
+**Plain:** the list of per-copy data (one matrix per copy), rewritten every frame, one per frame slot.
+**Introduced in:** § 22
+
+### storage buffer
+**Plain:** a buffer a shader reads like an array of any length; uniform buffers are for small fixed blocks.
+**Introduced in:** § 22
+
+### draw-call overhead
+**Plain:** the per-draw cost (CPU recording, GPU start-up), paid again for every draw however small.
+**Introduced in:** § 22
