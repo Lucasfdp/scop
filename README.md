@@ -108,6 +108,10 @@ takes the next picture in turn. Pictures must be 24- or 32-bit TGA
   face is showing, and distance from the camera).
 - Mouse orbit camera; one directional light with flat shading (off until B, so the
   mandatory greys are unchanged).
+- Shader hot reload: save `scop/shaders/mesh.vert` or `mesh.frag` while scop runs and the
+  change appears without restarting; a broken shader prints `glslc`'s error and the old one
+  keeps running. Needs `glslc` and the repo's `scop/shaders/` folder; otherwise it switches off.
+  (Run `make spv` afterwards to refresh the committed fallback.)
 - Depth buffer, window resizing, validation-layer-clean in debug builds.
 - Every real decision — what was chosen, what was rejected and why — is in
   [`DECISIONS.md`](DECISIONS.md).
@@ -146,7 +150,7 @@ recorded in [`DECISIONS.md`](DECISIONS.md) (2026-11-03).
   uniforms and descriptors, depth buffer, the `.obj` parser, greys and controls, the TGA
   loader and textures, the fade, window resizing, the bonus (ear clipping, box mapping,
   a picture per object, view modes, zoom, FPS, drag & drop, debug colours, orbit camera,
-  lighting) — plus the unit tests, the `Makefile`
+  lighting, shader hot reload) — plus the unit tests, the `Makefile`
   and `scripts/deps.sh`.
 - **Mine.** The choices (Rust + Vulkan, the engine/app split, and each decision in
   `DECISIONS.md`, picked from the trade-offs Claude laid out), running and checking every

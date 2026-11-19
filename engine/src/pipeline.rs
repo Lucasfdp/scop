@@ -14,11 +14,13 @@ const ENTRY_POINT: &CStr = c"main";
 /// Checkpoint experiment: try `GREATER` and only the background is left (Q-11.3).
 const DEPTH_COMPARE: vk::CompareOp = vk::CompareOp::LESS;
 
-/// Compiled shaders the app hands to the engine (SPIR-V bytes, e.g. from `include_bytes!`).
+/// Compiled shaders the app hands to the engine: SPIR-V bytes, from `include_bytes!`
+/// (`Shaders<'static>`) or compiled while running (§ 21). Only borrowed while the
+/// pipeline is built — the pipeline keeps its own copy (§ 6).
 #[derive(Clone, Copy)]
-pub struct Shaders {
-    pub vertex: &'static [u8],
-    pub fragment: &'static [u8],
+pub struct Shaders<'a> {
+    pub vertex: &'a [u8],
+    pub fragment: &'a [u8],
 }
 
 /// How a pipeline draws each triangle (§ 18). The same mesh can be drawn in any
@@ -49,7 +51,7 @@ impl Pipeline {
         device: &Device,
         layout: vk::PipelineLayout,
         (colour_format, depth_format): (vk::Format, vk::Format),
-        shaders: Shaders,
+        shaders: Shaders<'_>,
         style: DrawStyle,
     ) -> Result<Self, GpuError> {
         let vertex_words = spirv::words_from_bytes(shaders.vertex)?;

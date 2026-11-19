@@ -1,6 +1,8 @@
 //! scop — a `.obj` viewer built on the `engine` crate. scop only says *what* to
 //! show and how keys behave; the engine does everything GPU- and window-related.
 
+mod hot_reload;
+
 use std::env;
 use std::path::Path;
 use std::process::ExitCode;
@@ -12,7 +14,7 @@ use engine::{
 };
 
 /// The mesh shaders, compiled by `build.rs` and embedded in the binary.
-const MESH_SHADERS: Shaders = Shaders {
+const MESH_SHADERS: Shaders<'static> = Shaders {
     vertex: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.vert.spv")),
     fragment: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.frag.spv")),
 };
@@ -78,7 +80,8 @@ controls:
   Space       pause / resume the automatic spin
   R           reset (placement and zoom)
   Esc         quit
-  drop a .obj on the window to open it";
+  drop a .obj on the window to open it
+  save mesh.vert / mesh.frag while scop runs: they reload (hot reload)";
 
 /// Where the camera stands on its sphere round the model (§ 20). The distance isn't
 /// here: it's the framing distance (§ 12), so the orbit always fits the model.
@@ -227,6 +230,8 @@ struct Scop {
     orbit: Orbit,
     /// § 20: B. Off at the start, so the mandatory greys look exactly as before.
     light_on: bool,
+    /// § 21: watching the shader sources; `None` = hot reload off.
+    shader_watch: Option<hot_reload::ShaderWatch>,
 }
 
 /// A model read from a file and turned into meshes, but not uploaded yet (§ 19).
@@ -269,6 +274,19 @@ fn load_model(path: &Path) -> Result<LoadedModel, String> {
 }
 
 impl Scop {
+    /// § 21: a shader was saved. Compile both; on success swap every pipeline (one
+    /// per style). Any error is printed and the old shaders keep drawing.
+    fn reload_shaders(&mut self, vertex: &[u8], fragment: &[u8], gfx: &mut Gfx<'_>) {
+        let shaders = Shaders { vertex, fragment };
+        for &(style, pipeline) in &self.pipelines {
+            if let Err(err) = gfx.replace_pipeline(pipeline, shaders, style) {
+                eprintln!("scop: shaders not reloaded ({style:?}): {err}");
+                return;
+            }
+        }
+        println!("shaders reloaded");
+    }
+
     /// A file was dropped on the window (§ 19). Anything that goes wrong is printed,
     /// and the current model stays: a bad drop never closes the viewer.
     fn open_dropped(&mut self, path: &Path, gfx: &mut Gfx<'_>) {
@@ -374,6 +392,15 @@ impl App for Scop {
         // § 19: a new reading every half-second; the title shows the latest.
         if let Some(reading) = self.fps.tick(dt) {
             self.fps_reading = Some(reading);
+        }
+        // § 21: a saved shader → compile → swap. Errors keep the old shaders.
+        if let Some(watch) = &mut self.shader_watch
+            && watch.poll(dt)
+        {
+            match watch.compile_both() {
+                Ok((vertex, fragment)) => self.reload_shaders(&vertex, &fragment, gfx),
+                Err(err) => eprintln!("scop: shaders not reloaded:\n{err}"),
+            }
         }
         // § 19: files dropped on the window. Only the last .obj stays on screen.
         for path in input.dropped_files() {
@@ -544,6 +571,20 @@ fn main() -> ExitCode {
         }
     }
 
+    // § 21: watch the shader sources this binary was built from (the path is
+    // written in at build time), if they're still there and glslc is installed.
+    let shader_folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("shaders");
+    let shader_watch = match hot_reload::ShaderWatch::start(&shader_folder) {
+        Ok(watch) => {
+            println!("hot reload: watching {}", shader_folder.display());
+            Some(watch)
+        }
+        Err(why) => {
+            println!("hot reload off: {why}");
+            None
+        }
+    };
+
     let config = WindowConfig {
         title: window_title(&model.name, None),
         width: 1280,
@@ -565,6 +606,7 @@ fn main() -> ExitCode {
         colour_mode: 0,
         orbit: Orbit::START,
         light_on: false,
+        shader_watch,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,

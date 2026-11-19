@@ -306,3 +306,20 @@ clamp, outward unit normals on the cube.
 **Cost accepted:** teapot looks faceted; no shadows; mouse sensitivity in physical pixels (a
 Retina screen turns half as far per inch of drag).
 **Revisit if:** stretched models (use the inverse-transpose), or smooth shading is wanted.
+
+## 2026-11-19 — § 21: shader hot reload
+**Chose:** poll the two shader sources' modification times every 0.25 s (`std::fs`); on a
+save, run `glslc <file> -o -` and read the SPIR-V from its output; `Gfx::replace_pipeline`
+builds the new pipeline first, waits, destroys the old one and reuses its slot (same id).
+`Shaders<'a>` so runtime bytes can be passed. Source folder = `CARGO_MANIFEST_DIR/shaders`,
+written in at build time; missing folder or no `glslc` → "hot reload off", nothing else changes.
+On in every build.
+**Rejected:** a file-watching library (only window/event libraries allowed); a built-in GLSL
+compiler (forbidden and huge); destroy-then-build (a typo would leave nothing to draw);
+new ids per reload (the app would have to update its tickets for no benefit).
+**Why:** reuses § 16's tool, § 19's new-before-old and waiting; the engine part
+(`replace_pipeline`) is general — any app can swap a pipeline.
+**Cost accepted:** a short pause per reload (the wait); the shader contract (inputs, blocks,
+textures) still needs a restart; the committed `.spv` isn't refreshed by reloads (`make spv`).
+**Revisit if:** more shaders than two (watch a whole folder), or reloads should keep frames
+flowing (a deletion queue, as noted in § 19).

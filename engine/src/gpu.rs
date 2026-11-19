@@ -331,9 +331,43 @@ impl GpuContext {
     /// its ticket.
     pub(crate) fn create_pipeline(
         &mut self,
-        shaders: Shaders,
+        shaders: Shaders<'_>,
         style: DrawStyle,
     ) -> Result<PipelineId, GpuError> {
+        let pipeline = self.build_pipeline(shaders, style)?;
+        self.pipelines.push(pipeline);
+        Ok(PipelineId(self.pipelines.len() - 1))
+    }
+
+    /// § 21, the pipeline swap: builds the new pipeline first — if that fails, the
+    /// old one is untouched and still drawn. Then waits for the GPU (frames in flight
+    /// may use the old one), destroys the old one and puts the new one in its slot:
+    /// same id, so the app's tickets keep working.
+    pub(crate) fn replace_pipeline(
+        &mut self,
+        id: PipelineId,
+        shaders: Shaders<'_>,
+        style: DrawStyle,
+    ) -> Result<(), GpuError> {
+        if id.0 >= self.pipelines.len() {
+            return Err(GpuError::UnknownHandle);
+        }
+        let new = self.build_pipeline(shaders, style)?;
+        // SAFETY: after the wait nothing on the GPU uses the old pipeline; it's
+        // replaced in its slot, so it's destroyed exactly once.
+        unsafe {
+            if let Err(e) = self.device.device_wait_idle() {
+                new.destroy(&self.device); // never used: safe to destroy now
+                return Err(e.into());
+            }
+            let old = std::mem::replace(&mut self.pipelines[id.0], new);
+            old.destroy(&self.device);
+        }
+        Ok(())
+    }
+
+    /// One pipeline for the swapchain's format, after checking the style is possible.
+    fn build_pipeline(&self, shaders: Shaders<'_>, style: DrawStyle) -> Result<Pipeline, GpuError> {
         // Checked here, so a missing feature is a clear error, not a validation
         // message (Q-18.4) — or, without validation, undefined behaviour.
         if !self.supports(style) {
@@ -341,15 +375,13 @@ impl GpuContext {
                 "fillModeNonSolid (wireframe drawing) on this GPU",
             ));
         }
-        let pipeline = Pipeline::new(
+        Pipeline::new(
             &self.device,
             self.inputs.pipeline_layout,
             (self.swapchain.format.format, self.depth.format),
             shaders,
             style,
-        )?;
-        self.pipelines.push(pipeline);
-        Ok(PipelineId(self.pipelines.len() - 1))
+        )
     }
 
     /// Uploads a mesh to device-local memory and returns its ticket.

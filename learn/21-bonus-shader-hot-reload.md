@@ -2,7 +2,7 @@
 section: 21
 slug: bonus-shader-hot-reload
 tier: T1
-status: in-progress
+status: done
 prereqs: [6, 16, 19]
 terms: [hot reload, runtime shader compile, modification time, polling, pipeline swap, shader contract]
 ---

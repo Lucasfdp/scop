@@ -55,7 +55,7 @@ pub struct Gfx<'a> {
 
 impl Gfx<'_> {
     /// Builds a pipeline from the app's compiled shaders, drawing solid triangles.
-    pub fn create_pipeline(&mut self, shaders: Shaders) -> Result<PipelineId, RunError> {
+    pub fn create_pipeline(&mut self, shaders: Shaders<'_>) -> Result<PipelineId, RunError> {
         self.create_styled_pipeline(shaders, DrawStyle::Fill)
     }
 
@@ -63,10 +63,23 @@ impl Gfx<'_> {
     /// can't do: check `supports` first.
     pub fn create_styled_pipeline(
         &mut self,
-        shaders: Shaders,
+        shaders: Shaders<'_>,
         style: DrawStyle,
     ) -> Result<PipelineId, RunError> {
         Ok(self.gpu.create_pipeline(shaders, style)?)
+    }
+
+    /// Swaps `pipeline` for one built from new shaders (§ 21: hot reload). The new
+    /// one is built first: on error, the old pipeline stays and keeps drawing. On
+    /// success the GPU is waited for (a short pause) and the old one destroyed; the
+    /// id stays the same, so draws that name it get the new version.
+    pub fn replace_pipeline(
+        &mut self,
+        pipeline: PipelineId,
+        shaders: Shaders<'_>,
+        style: DrawStyle,
+    ) -> Result<(), RunError> {
+        Ok(self.gpu.replace_pipeline(pipeline, shaders, style)?)
     }
 
     /// Whether this GPU can draw in `style` (§ 18: wireframe is optional).
