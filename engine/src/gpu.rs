@@ -117,7 +117,9 @@ pub(crate) struct GpuContext {
     textures: Textures,
     // Owned here, handed out to the app as `PipelineId(i)` / `MeshId(i)` (§ 8).
     pipelines: Vec<Pipeline>,
-    meshes: Vec<Mesh>,
+    /// `None` = destroyed (§ 19). Slots are never reused, so an old `MeshId` can
+    /// only ever fail, never draw a different mesh.
+    meshes: Vec<Option<Mesh>>,
 }
 
 /// What happened when a frame was drawn.
@@ -359,8 +361,29 @@ impl GpuContext {
             queue: self.queue,
         };
         let mesh = Mesh::upload(&uploader, data)?;
-        self.meshes.push(mesh);
+        self.meshes.push(Some(mesh));
         Ok(MeshId(self.meshes.len() - 1))
+    }
+
+    /// Destroys a mesh mid-run (§ 19). Waits for the GPU first: frames still in
+    /// flight may have been recorded with this mesh's buffers (Q-19.3).
+    pub(crate) fn destroy_mesh(&mut self, id: MeshId) -> Result<(), GpuError> {
+        let Some(slot) = self.meshes.get_mut(id.0) else {
+            return Err(GpuError::UnknownHandle);
+        };
+        let Some(mesh) = slot.take() else {
+            return Err(GpuError::UnknownHandle); // destroyed already
+        };
+        // SAFETY: after the wait nothing on the GPU uses the mesh; it was taken out
+        // of its slot, so it's destroyed exactly once.
+        unsafe {
+            if let Err(e) = self.device.device_wait_idle() {
+                *slot = Some(mesh); // not destroyed: leave it where it was
+                return Err(e.into());
+            }
+            mesh.destroy(&self.device);
+        }
+        Ok(())
     }
 
     /// Uploads a picture as a texture (§ 14). Returns its index for a `TextureId`.
@@ -442,14 +465,14 @@ impl GpuContext {
         for call in &frame.draws {
             match (
                 self.pipelines.get(call.pipeline.0),
-                self.meshes.get(call.mesh.0),
+                self.meshes.get(call.mesh.0).and_then(Option::as_ref),
                 self.textures.set(call.texture.0),
             ) {
                 (Some(p), Some(m), Some(t)) => list.draws.push(Draw {
                     pipeline: p.handle,
                     mesh: m,
                     texture_set: t,
-                    push: push_bytes(call.model, call.blend),
+                    push: push_bytes(call.model, call.params),
                 }),
                 _ => return Err(GpuError::UnknownHandle),
             }
@@ -579,7 +602,7 @@ impl Drop for GpuContext {
             // Nothing may be destroyed while the GPU might still be using it. If the
             // wait itself fails, the device is lost and there's nothing left to wait for.
             let _ = self.device.device_wait_idle();
-            for mesh in &self.meshes {
+            for mesh in self.meshes.iter().flatten() {
                 mesh.destroy(&self.device);
             }
             for pipeline in &self.pipelines {

@@ -2,7 +2,7 @@
 section: 4
 slug: surface-and-swapchain
 tier: T2
-status: not-started
+status: done
 prereqs: [3]
 terms: [surface, VK_KHR_surface, VK_EXT_metal_surface, raw-window-handle, ash-window, present, VK_KHR_swapchain, surface capabilities, surface format, sRGB, present mode, FIFO, MAILBOX, extent, VkImage, image view, ERROR_OUT_OF_DATE_KHR]
 ---

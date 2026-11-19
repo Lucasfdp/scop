@@ -2,6 +2,7 @@
 //! `winit` key code, so a `winit` update only changes `from_winit` below.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use winit::keyboard::KeyCode;
 
@@ -114,6 +115,8 @@ pub struct Input {
     pressed: HashSet<Key>,
     /// Wheel movement since the last frame, in notches.
     scroll: f32,
+    /// Files dropped on the window since the last frame (§ 19).
+    dropped: Vec<PathBuf>,
 }
 
 impl Input {
@@ -133,6 +136,16 @@ impl Input {
     /// to notches too, so one number works for both.
     pub fn scroll(&self) -> f32 {
         self.scroll
+    }
+
+    /// Files dragged onto the window since the last frame, in the order they
+    /// arrived (§ 19). Usually empty; one entry per file when several are dropped.
+    pub fn dropped_files(&self) -> &[PathBuf] {
+        &self.dropped
+    }
+
+    pub(crate) fn drop_file(&mut self, path: PathBuf) {
+        self.dropped.push(path);
     }
 
     /// A wheel movement in notches (`lines`), as a mouse reports it.
@@ -156,10 +169,12 @@ impl Input {
         self.held.remove(&key);
     }
 
-    /// Called after the app's `update`: "pressed" and the scroll only last one frame.
+    /// Called after the app's `update`: "pressed", the scroll and dropped files only
+    /// last one frame.
     pub(crate) fn end_frame(&mut self) {
         self.pressed.clear();
         self.scroll = 0.0;
+        self.dropped.clear();
     }
 }
 
@@ -178,6 +193,16 @@ mod tests {
         assert!(!input.pressed(Key::Space) && input.held(Key::Space));
         input.key_up(Key::Space);
         assert!(!input.held(Key::Space));
+    }
+
+    #[test]
+    fn dropped_files_last_one_frame() {
+        let mut input = Input::default();
+        input.drop_file(PathBuf::from("a.obj"));
+        input.drop_file(PathBuf::from("b.obj"));
+        assert_eq!(input.dropped_files().len(), 2);
+        input.end_frame();
+        assert!(input.dropped_files().is_empty());
     }
 
     #[test]

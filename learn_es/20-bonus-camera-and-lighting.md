@@ -1,13 +1,13 @@
 ---
-section: 19
-slug: bonus-extras
-tier: TBD
+section: 20
+slug: bonus-camera-and-lighting
+tier: T2
 status: not-started
-prereqs: [16]
+prereqs: [10, 13, 18]
 terms: []
 ---
 
-# Sección 19 — Tus propios extras
+# Sección 20 — Una cámara que manejas, y luz
 
 _Se escribe cuando llegues a esta sección._
 
@@ -22,4 +22,3 @@ _Se escribe cuando llegues a esta sección._
 ## Checkpoint
 
 ## Preguntas
-

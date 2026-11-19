@@ -2,7 +2,7 @@
 section: 5
 slug: commands-and-sync
 tier: T2
-status: in-progress
+status: done
 prereqs: [4]
 terms: [command pool, recording, vkQueueSubmit, fence, semaphore, acquire, frames in flight, image layout, layout transition, pipeline barrier, pipeline stage, access mask, vkCmdClearColorImage, TRANSFER_DST, device_wait_idle, RedrawRequested]
 ---

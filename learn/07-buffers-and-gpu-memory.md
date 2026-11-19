@@ -2,7 +2,7 @@
 section: 7
 slug: buffers-and-gpu-memory
 tier: T2
-status: in-progress
+status: done
 prereqs: [6]
 terms: [mesh, buffer, buffer usage, device memory, memory requirements, memory type, memory heap, DEVICE_LOCAL, HOST_VISIBLE, HOST_COHERENT, map, bind (memory), staging buffer, cmd_copy_buffer, vertex buffer, index buffer, index type, stride, vertex binding, vertex attribute, attribute format, offset_of!, draw_indexed]
 ---

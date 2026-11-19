@@ -1395,3 +1395,107 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### scroll delta
 **Plain:** how far the mouse wheel moved this frame; lines (mouse) and pixels (trackpad) turned into one number.
 **Introduced in:** § 18
+
+### frames per second
+**Plain:** frames finished per second, averaged over a short window (0.5 s in scop).
+**Introduced in:** § 19
+
+### frame time
+**Plain:** milliseconds per frame (`1000 ÷ FPS`); what programmers compare, because it adds up.
+**Introduced in:** § 19
+
+### vsync cap
+**Plain:** FIFO presentation waits for the screen's refresh, so FPS can't go above 60 / 120 / ….
+**Introduced in:** § 19
+
+### averaging window
+**Plain:** how long frames are counted before the FPS number is updated.
+**Introduced in:** § 19
+
+### title throttling
+**Plain:** changing the window title only when its text changes, not every frame.
+**Introduced in:** § 19
+
+### dropped file
+**Plain:** winit's `DroppedFile(path)` event: a file was dragged onto the window.
+**Introduced in:** § 19
+
+### runtime mesh replacement
+**Plain:** creating and destroying meshes after `setup`, while frames are in flight — wait before destroying.
+**Introduced in:** § 19
+
+### stale handle
+**Plain:** an id for something already destroyed; using it must be a reported error, never a crash.
+**Introduced in:** § 19
+
+### debug view
+**Plain:** false colours that show a hidden number (which side is facing you, how far away…).
+**Introduced in:** § 19
+
+### gl_FrontFacing
+**Plain:** fragment shader input: true if this triangle is seen from its front. Always true for points.
+**Introduced in:** § 19
+
+### winding order
+**Plain:** whether a triangle's corners go clockwise or anticlockwise on screen; decides front vs back.
+**Introduced in:** § 19
+
+### inside-out face
+**Plain:** a face listed clockwise when seen from outside, so its front points into the model.
+**Introduced in:** § 19
+
+### linear depth
+**Plain:** distance from the camera along the view direction; after the perspective card it's `w`.
+**Introduced in:** § 19
+
+### push params
+**Plain:** four app-defined numbers in the push block next to the model matrix (scop: fade, debug mode, depth range).
+**Introduced in:** § 19
+
+### orbit camera
+**Plain:** a camera on a sphere around a target, always looking at it (yaw, pitch, distance).
+**Introduced in:** § 20
+
+### yaw and pitch
+**Plain:** yaw = walk round the target; pitch = climb over or under it.
+**Introduced in:** § 20
+
+### pitch clamp
+**Plain:** stopping pitch just short of straight up/down (±89°) so the camera never flips.
+**Introduced in:** § 20
+
+### look-at
+**Plain:** the engine's view card: stand here, look at that, this way is up.
+**Introduced in:** § 20
+
+### mouse delta
+**Plain:** how far the mouse moved this frame, in pixels — the camera turns by movement, not position.
+**Introduced in:** § 20
+
+### directional light
+**Plain:** light from one direction everywhere, like the sun: a direction, no position.
+**Introduced in:** § 20
+
+### normal
+**Plain:** the direction a face points, length 1; one per corner, sent to the shaders.
+**Introduced in:** § 20
+
+### flat shading
+**Plain:** every corner of a face carries the face's normal: one brightness per face, crisp edges.
+**Introduced in:** § 20
+
+### diffuse
+**Plain:** brightness from facing the light: full when facing it, none when side-on or away.
+**Introduced in:** § 20
+
+### ambient
+**Plain:** a small constant brightness everywhere, so faces turned away aren't black.
+**Introduced in:** § 20
+
+### world-fixed light
+**Plain:** the light's direction belongs to the world, not the camera; orbiting doesn't move it.
+**Introduced in:** § 20
+
+### normal transform
+**Plain:** turning normals with the model's rotation (the model matrix without its move).
+**Introduced in:** § 20

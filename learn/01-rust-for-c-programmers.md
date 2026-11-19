@@ -2,7 +2,7 @@
 section: 1
 slug: rust-for-c-programmers
 tier: T2
-status: not-started
+status: done
 prereqs: []
 terms: [ownership, move, borrow, lifetime, Option, Result, ? operator, trait, Drop, RAII, crate, Cargo workspace, unsafe, raw pointer, CString, repr(C)]
 ---

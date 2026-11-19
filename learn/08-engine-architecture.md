@@ -2,7 +2,7 @@
 section: 8
 slug: engine-architecture
 tier: T2
-status: in-progress
+status: done
 prereqs: [7]
 terms: [public API, crate boundary, coupling, inversion of control, App trait, default method, generic function, newtype, typed handle, draw list, input abstraction, delta time, re-export]
 ---

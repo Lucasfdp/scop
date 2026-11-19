@@ -130,13 +130,13 @@ pub(crate) struct FrameTarget<'a> {
 }
 
 /// One draw, resolved from the app's tickets: real objects plus the model matrix
-/// as the 64 bytes the push constant carries.
+/// and params as the 80 bytes the push constant carries.
 pub(crate) struct Draw<'a> {
     pub(crate) pipeline: vk::Pipeline,
     pub(crate) mesh: &'a Mesh,
     /// Set 1: the picture this draw reads (§ 14).
     pub(crate) texture_set: vk::DescriptorSet,
-    /// The sticky note: model matrix + blend factor (§ 15), as bytes.
+    /// The sticky note: model matrix + the app's four params (§ 15, § 19), as bytes.
     pub(crate) push: [u8; PUSH_SIZE],
 }
 
@@ -292,7 +292,7 @@ pub(crate) fn record_frame(
                 &[draw.texture_set],
                 &[],
             );
-            // The sticky note: model (bytes 0..64) + blend (64..68), both stages —
+            // The sticky note: model (bytes 0..64) + params (64..80), both stages —
             // the same stages and size as the layout's range, or validation complains.
             device.cmd_push_constants(command_buffer, list.layout, PUSH_STAGES, 0, &draw.push);
             // Corners from binding 0, triangles from the index buffer (32-bit indices).

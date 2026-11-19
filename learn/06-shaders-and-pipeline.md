@@ -2,7 +2,7 @@
 section: 6
 slug: shaders-and-pipeline
 tier: T2
-status: in-progress
+status: done
 prereqs: [5]
 terms: [shader module, entry point, build script, glslc, include_bytes!, SPIR-V magic number, graphics pipeline, fixed-function state, input assembly, viewport, scissor, dynamic state, cull mode, front face, colour write mask, pipeline layout, dynamic rendering, VK_KHR_dynamic_rendering, load op / store op, gl_VertexIndex, gl_Position, location, interpolation]
 ---

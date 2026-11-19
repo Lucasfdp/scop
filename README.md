@@ -57,10 +57,15 @@ make run OBJ=resources/test/concave.obj TEXTURE="a.tga b.tga"  # one picture per
 | T | fade between the grey faces and the picture |
 | N | rotate which object gets which picture |
 | V | solid → wireframe → points |
+| C | colours: normal → facing (blue front, red back) → depth (near white, far dark) |
 | mouse wheel, Z / X | zoom in / out (narrows the field of view; the camera stays put) |
 | Space | pause / resume the automatic spin |
 | R | reset position, rotation and zoom |
 | Esc | quit |
+
+Drop a `.obj` file on the window to open it; a broken file is reported in the terminal
+and the current model stays. The title shows the file and the frame rate (capped at the
+screen's refresh rate: scop waits for vsync).
 
 Movement follows the screen's axes whatever way the model is turned; every rotation is
 around the model's own centre.
@@ -97,6 +102,8 @@ takes the next picture in turn. Pictures must be 24- or 32-bit TGA
   a picture per object (`o` / `g` lines), rotated with N; the grey ↔ picture fade eased with smoothstep and
   reversible at any moment.
 - Solid, wireframe and point views; zoom by field of view.
+- Frame rate in the title, drag & drop to open models, debug colours (which side of each
+  face is showing, and distance from the camera).
 - Depth buffer, window resizing, validation-layer-clean in debug builds.
 - Every real decision — what was chosen, what was rejected and why — is in
   [`DECISIONS.md`](DECISIONS.md).
@@ -134,7 +141,7 @@ recorded in [`DECISIONS.md`](DECISIONS.md) (2026-11-03).
   synchronisation, pipeline and shader loading, buffers, the maths library,
   uniforms and descriptors, depth buffer, the `.obj` parser, greys and controls, the TGA
   loader and textures, the fade, window resizing, the bonus (ear clipping, box mapping,
-  a picture per object, view modes, zoom) — plus the unit tests, the `Makefile`
+  a picture per object, view modes, zoom, FPS, drag & drop, debug colours) — plus the unit tests, the `Makefile`
   and `scripts/deps.sh`.
 - **Mine.** The choices (Rust + Vulkan, the engine/app split, and each decision in
   `DECISIONS.md`, picked from the trade-offs Claude laid out), running and checking every

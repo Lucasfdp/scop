@@ -2,7 +2,7 @@
 section: 2
 slug: how-a-gpu-draws
 tier: T2
-status: not-started
+status: done
 prereqs: [1]
 terms: [CPU, GPU, API, Vulkan, MoltenVK, rendering pipeline, vertex, primitive, vertex shader, rasterisation, fragment, fragment shader, framebuffer, swapchain, NDC, GLSL, SPIR-V, command buffer, queue, winit, event loop]
 ---

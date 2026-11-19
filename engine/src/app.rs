@@ -17,8 +17,9 @@ pub trait App {
     fn setup(&mut self, gfx: &mut Gfx<'_>) -> Result<(), RunError>;
 
     /// Every frame, before drawing. `dt` is seconds since the previous frame.
+    /// `gfx` lets the app make (and destroy) meshes and textures mid-run (§ 19).
     /// Return `Flow::Exit` to quit. Default: carry on.
-    fn update(&mut self, _input: &Input, _dt: f32) -> Flow {
+    fn update(&mut self, _input: &Input, _dt: f32, _gfx: &mut Gfx<'_>) -> Flow {
         Flow::Continue
     }
 
@@ -83,6 +84,14 @@ impl Gfx<'_> {
         Ok(TextureId(self.gpu.create_texture(image)?))
     }
 
+    /// Frees a mesh made with `create_mesh` (§ 19: swapping models mid-run). Waits for
+    /// the GPU to finish everything first, because frames still in flight may be
+    /// drawing it (Q-19.3) — a short pause, so don't call it every frame. The id is
+    /// never reused: drawing with it afterwards is an error, not someone else's mesh.
+    pub fn destroy_mesh(&mut self, mesh: MeshId) -> Result<(), RunError> {
+        Ok(self.gpu.destroy_mesh(mesh)?)
+    }
+
     /// Facts about the GPU and swapchain, for printing.
     pub fn info(&self) -> GpuInfo {
         self.gpu.info()
@@ -115,8 +124,9 @@ pub(crate) struct DrawCall {
     pub(crate) mesh: MeshId,
     pub(crate) texture: TextureId,
     pub(crate) model: Mat4,
-    /// 0 = vertex colours only, 1 = texture only, in between = a mix (§ 15).
-    pub(crate) blend: f32,
+    /// Four numbers for the shaders, meaning set by the app (§ 19). With
+    /// `draw_textured`: `[blend, 0, 0, 0]` (§ 15).
+    pub(crate) params: [f32; 4],
 }
 
 /// The draw list for one frame: what the app asks the engine to draw.
@@ -125,6 +135,8 @@ pub struct Frame {
     pub(crate) aspect: f32,
     pub(crate) camera: Mat4,
     pub(crate) draws: Vec<DrawCall>,
+    /// The window title the app asked for this frame, if any (§ 19).
+    pub(crate) title: Option<String>,
 }
 
 impl Frame {
@@ -135,6 +147,7 @@ impl Frame {
             aspect,
             camera: Mat4::IDENTITY,
             draws: Vec::new(),
+            title: None,
         }
     }
 
@@ -148,6 +161,12 @@ impl Frame {
     /// (corners are used as-is, in Vulkan's −1..+1 screen box).
     pub fn set_camera(&mut self, view_proj: Mat4) {
         self.camera = view_proj;
+    }
+
+    /// The window's title (§ 19). Cheap to call every frame: the engine only passes
+    /// it to the window when the text actually changes (title throttling).
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        self.title = Some(title.into());
     }
 
     /// Background colour (linear RGBA, 0.0–1.0). Default: black.
@@ -171,12 +190,27 @@ impl Frame {
         model: Mat4,
         blend: f32,
     ) {
+        let params = [blend.clamp(0.0, 1.0), 0.0, 0.0, 0.0];
+        self.draw_with(pipeline, mesh, texture, model, params);
+    }
+
+    /// The general form (§ 19): like `draw_textured`, but the app fills in all four
+    /// push params itself — `params` arrives in the shaders as `push.params` (a
+    /// `vec4`). The engine doesn't look inside: what each number means is the app's.
+    pub fn draw_with(
+        &mut self,
+        pipeline: PipelineId,
+        mesh: MeshId,
+        texture: TextureId,
+        model: Mat4,
+        params: [f32; 4],
+    ) {
         self.draws.push(DrawCall {
             pipeline,
             mesh,
             texture,
             model,
-            blend: blend.clamp(0.0, 1.0),
+            params,
         });
     }
 }
@@ -198,8 +232,19 @@ mod tests {
         assert_eq!(frame.draws[1].mesh, MeshId(1));
         assert_eq!(frame.draws[1].texture, TextureId(0)); // plain draw = white texture
         assert_eq!(frame.draws[1].model, spin);
-        assert_eq!(frame.draws[1].blend, 0.0); // plain draw = colours only
+        assert_eq!(frame.draws[1].params, [0.0; 4]); // plain draw = colours only
         frame.draw_textured(PipelineId(0), MeshId(0), TextureId(1), spin, 7.0);
-        assert_eq!(frame.draws[2].blend, 1.0); // clamped
+        assert_eq!(frame.draws[2].params, [1.0, 0.0, 0.0, 0.0]); // blend clamped
+        frame.draw_with(
+            PipelineId(0),
+            MeshId(0),
+            TextureId(1),
+            spin,
+            [7.0, 1.0, 2.0, 3.0],
+        );
+        assert_eq!(frame.draws[3].params, [7.0, 1.0, 2.0, 3.0]); // passed on untouched
+        assert_eq!(frame.title, None);
+        frame.set_title("scop");
+        assert_eq!(frame.title.as_deref(), Some("scop"));
     }
 }

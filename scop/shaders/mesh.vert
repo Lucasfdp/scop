@@ -9,10 +9,10 @@ layout(set = 0, binding = 0) uniform Camera {
     mat4 view_proj;   // projection × view, once per frame
 } camera;
 
-// Sticky note: pushed before each draw. Same block in mesh.frag (§ 15).
+// Sticky note: pushed before each draw. Same block in mesh.frag (§ 15, § 19).
 layout(push_constant) uniform Push {
     mat4 model;       // this object's place and turn
-    float blend;      // § 15: 0 = grey, 1 = picture (used by the fragment shader)
+    vec4 params;      // scop's four numbers, used by the fragment shader (§ 19)
 } push;
 
 layout(location = 0) in vec3 in_position; // from the vertex buffer (3D since § 10)
@@ -21,12 +21,16 @@ layout(location = 2) in vec2 in_uv;       // § 14: where this corner sits on th
 
 layout(location = 0) out vec3 colour;     // to the fragment shader (separate numbering)
 layout(location = 1) out vec2 uv;         // blended across the triangle by the rasteriser
+layout(location = 2) out float distance;  // § 19: how far from the camera (depth mode)
 
 void main() {
     // Right to left (§ 9): place the corner (w = 1: a point), then camera, then projection.
     gl_Position = camera.view_proj * push.model * vec4(in_position, 1.0);
     colour = in_colour;
     uv = in_uv;
+    // § 19: the perspective card's last row copied the distance into w (§ 9), so w
+    // *is* the linear depth. (gl_FragCoord.z, the stored depth, isn't linear: Q-19.5.)
+    distance = gl_Position.w;
     // § 18: dot size in pixels when drawn as points (ignored for triangles). The GPU
     // clamps it to its range (GpuInfo::point_size_range).
     gl_PointSize = 4.0;

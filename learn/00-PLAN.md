@@ -51,7 +51,7 @@ curriculum by luferna3.* Plus Description, Instructions, Resources (with AI usag
 - [10pt] Complex `.obj` files: concave and non-coplanar faces; render the original
   teapot without edge artefacts.
 - [5pt] Texture without visible stretching on some faces.
-- [10pt] Your own extra features — **to be decided later** (§ 19).
+- [10pt] Your own extra features — chosen 2026-11-18: §§ 19–23 (quality of life, camera + light, shader hot-reload, instancing, skybox), plus § 18's picture per object, view modes and zoom.
 
 ## Depth allocation
 
@@ -98,25 +98,25 @@ and **lighting**. Those are deliberately left to ft_newton and ft_vox.
 
 | # | File | Title | Tier | Status | Checkpoint |
 |---|---|---|---|---|---|
-| 1 | `01-rust-for-c-programmers.md` | Rust for a C programmer | T2 | not started | Workspace (`engine` + `scop`), file reading with `Result` |
-| 2 | `02-how-a-gpu-draws.md` | How a GPU draws a triangle | T2 | not started | `winit` window, event loop, Esc to quit |
-| 3 | `03-vulkan-instance-and-device.md` | Talking to the GPU | T2 | not started | Instance + validation layers + logical device |
-| 4 | `04-surface-and-swapchain.md` | Getting images to the screen | T2 | not started | Swapchain created, images listed |
-| 5 | `05-commands-and-sync.md` | Giving the GPU work, and waiting | T2 | not started | Window cleared to a colour every frame |
-| 6 | `06-shaders-and-pipeline.md` | Programs that run on the GPU | T2 | not started | Hard-coded triangle on screen |
-| 7 | `07-buffers-and-gpu-memory.md` | Sending data to the GPU | T2 | not started | Triangle/quad from vertex + index buffers |
-| 8 | `08-engine-architecture.md` | Splitting engine from app | T2 | not started | Refactor: scop uses only the engine's public API |
-| 9 | `09-maths-for-3d.md` | Just enough 3D maths | T1 | not started | Own `Vec3`/`Mat4` + tests |
-| 10 | `10-uniforms-and-descriptors.md` | Passing per-frame data to shaders | T2 | not started | Spinning cube in perspective |
-| 11 | `11-depth-buffer.md` | What's in front of what | T2 | not started | Cube with correct face occlusion |
-| 12 | `12-obj-parser.md` | Reading `.obj` files | T1 | not started | 42 logo and teapot load and render |
-| 13 | `13-faces-and-controls.md` | Grey faces and moving the model | T1 | not started | Per-face greys, rotate/translate around centre |
-| 14 | `14-textures.md` | Images on surfaces | T2 | not started | Own TGA loader, textured model |
-| 15 | `15-smooth-transition.md` | Fading colour into texture | T1 | not started | Key toggles with smooth blend |
-| 16 | `16-mandatory-finish.md` | Making the mandatory part perfect | T1 | not started | Resize handling, `make` one-liner, README, self-evaluation |
-| 17 | `17-bonus-complex-obj.md` | Concave and non-flat faces | T1 | not started | Original teapot renders cleanly |
-| 18 | `18-bonus-texture-mapping.md` | Textures without stretching | T1 | not started | No stretched faces |
-| 19 | `19-bonus-quality-of-life.md` | Quality of life: FPS, drag & drop, debug colours | T1 | not started | FPS in the title, drop a `.obj` to load it, debug colour modes (facing / depth) |
+| 1 | `01-rust-for-c-programmers.md` | Rust for a C programmer | T2 | done | Workspace (`engine` + `scop`), file reading with `Result` |
+| 2 | `02-how-a-gpu-draws.md` | How a GPU draws a triangle | T2 | done | `winit` window, event loop, Esc to quit |
+| 3 | `03-vulkan-instance-and-device.md` | Talking to the GPU | T2 | done | Instance + validation layers + logical device |
+| 4 | `04-surface-and-swapchain.md` | Getting images to the screen | T2 | done | Swapchain created, images listed |
+| 5 | `05-commands-and-sync.md` | Giving the GPU work, and waiting | T2 | done | Window cleared to a colour every frame |
+| 6 | `06-shaders-and-pipeline.md` | Programs that run on the GPU | T2 | done | Hard-coded triangle on screen |
+| 7 | `07-buffers-and-gpu-memory.md` | Sending data to the GPU | T2 | done | Triangle/quad from vertex + index buffers |
+| 8 | `08-engine-architecture.md` | Splitting engine from app | T2 | done | Refactor: scop uses only the engine's public API |
+| 9 | `09-maths-for-3d.md` | Just enough 3D maths | T1 | done | Own `Vec3`/`Mat4` + tests |
+| 10 | `10-uniforms-and-descriptors.md` | Passing per-frame data to shaders | T2 | done | Spinning cube in perspective |
+| 11 | `11-depth-buffer.md` | What's in front of what | T2 | done | Cube with correct face occlusion |
+| 12 | `12-obj-parser.md` | Reading `.obj` files | T1 | done | 42 logo and teapot load and render |
+| 13 | `13-faces-and-controls.md` | Grey faces and moving the model | T1 | done | Per-face greys, rotate/translate around centre |
+| 14 | `14-textures.md` | Images on surfaces | T2 | done | Own TGA loader, textured model |
+| 15 | `15-smooth-transition.md` | Fading colour into texture | T1 | done | Key toggles with smooth blend |
+| 16 | `16-mandatory-finish.md` | Making the mandatory part perfect | T1 | done | Resize handling, `make` one-liner, README, self-evaluation |
+| 17 | `17-bonus-complex-obj.md` | Concave and non-flat faces | T1 | done | Original teapot renders cleanly |
+| 18 | `18-bonus-texture-mapping.md` | Textures without stretching | T1 | done | No stretched faces |
+| 19 | `19-bonus-quality-of-life.md` | Quality of life: FPS, drag & drop, debug colours | T1 | in progress | FPS in the title, drop a `.obj` to load it, debug colour modes (facing / depth) |
 | 20 | `20-bonus-camera-and-lighting.md` | A camera you steer, and light | T2 | not started | Mouse orbit camera; one directional light shading faces by angle |
 | 21 | `21-bonus-shader-hot-reload.md` | Shaders that reload while running | T1 | not started | Edit a shader, see it change without restarting |
 | 22 | `22-bonus-instancing.md` | Hundreds of copies in one draw | T2 | not started | Hundreds of spinning logos from one mesh and one draw |

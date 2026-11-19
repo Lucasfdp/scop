@@ -7,7 +7,7 @@
 //! Shader side (must match):
 //! ```glsl
 //! layout(set = 0, binding = 0) uniform Camera { mat4 view_proj; } camera;
-//! layout(push_constant) uniform Push { mat4 model; } push;
+//! layout(push_constant) uniform Push { mat4 model; vec4 params; } push;
 //! ```
 
 use std::ptr;
@@ -21,20 +21,23 @@ use crate::maths::Mat4;
 /// One `mat4` in std140: 16 floats, 64 bytes.
 pub(crate) const MAT4_SIZE: usize = 64;
 
-/// The sticky note (§ 10, § 15): model matrix (bytes 0..64) + blend factor (64..68).
-pub(crate) const PUSH_SIZE: usize = MAT4_SIZE + 4;
+/// The sticky note (§ 10, § 15, § 19): model matrix (bytes 0..64) + four numbers whose
+/// meaning the app decides (64..80). 80 ≤ 128, the size every GPU must allow.
+pub(crate) const PUSH_SIZE: usize = MAT4_SIZE + 16;
 /// Both shaders read the push block: the vertex shader the model, the fragment
-/// shader the blend factor (Q-15.4: a stage missing here fails at pipeline creation).
+/// shader the params (Q-15.4: a stage missing here fails at pipeline creation).
 pub(crate) const PUSH_STAGES: vk::ShaderStageFlags = vk::ShaderStageFlags::from_raw(
     vk::ShaderStageFlags::VERTEX.as_raw() | vk::ShaderStageFlags::FRAGMENT.as_raw(),
 );
 
-/// One draw's push-constant bytes: the model matrix, then the blend factor,
-/// laid out like the GLSL block `{ mat4 model; float blend; }`.
-pub(crate) fn push_bytes(model: Mat4, blend: f32) -> [u8; PUSH_SIZE] {
+/// One draw's push-constant bytes: the model matrix, then the four params,
+/// laid out like the GLSL block `{ mat4 model; vec4 params; }`.
+pub(crate) fn push_bytes(model: Mat4, params: [f32; 4]) -> [u8; PUSH_SIZE] {
     let mut bytes = [0u8; PUSH_SIZE];
     bytes[..MAT4_SIZE].copy_from_slice(&mat4_bytes(model));
-    bytes[MAT4_SIZE..].copy_from_slice(&blend.to_ne_bytes());
+    for (chunk, value) in bytes[MAT4_SIZE..].chunks_exact_mut(4).zip(params) {
+        chunk.copy_from_slice(&value.to_ne_bytes());
+    }
     bytes
 }
 
@@ -87,7 +90,7 @@ impl ShaderInputs {
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)];
-        // The sticky note: model + blend factor, read by both shaders (§ 15).
+        // The sticky note: model + four params, read by both shaders (§ 15, § 19).
         let push_ranges = [vk::PushConstantRange::default()
             .stage_flags(PUSH_STAGES)
             .offset(0)
@@ -274,11 +277,15 @@ mod tests {
     use crate::maths::Vec3;
 
     #[test]
-    fn push_bytes_put_blend_after_the_matrix() {
-        let bytes = push_bytes(Mat4::IDENTITY, 0.25);
-        assert_eq!(bytes.len(), 68);
+    fn push_bytes_put_params_after_the_matrix() {
+        let bytes = push_bytes(Mat4::IDENTITY, [0.25, 2.0, 3.5, 9.0]);
+        assert_eq!(bytes.len(), 80);
         assert_eq!(bytes[..64], mat4_bytes(Mat4::IDENTITY));
-        assert_eq!(f32::from_ne_bytes(bytes[64..68].try_into().unwrap()), 0.25);
+        let float_at = |i: usize| f32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap());
+        assert_eq!(
+            [float_at(64), float_at(68), float_at(72), float_at(76)],
+            [0.25, 2.0, 3.5, 9.0]
+        );
     }
 
     #[test]

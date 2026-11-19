@@ -554,3 +554,56 @@ validation, the result is undefined — maybe solid triangles, maybe a crash.)
 much more than parts further away, so the model looks deeper and more distorted. Zooming keeps the
 camera where it is and only crops the view, so near and far parts grow equally: the model looks
 **flatter**, like a telephoto shot. (Same size on screen, different shape.)
+
+## Section 19
+
+**A-19.1** The **vsync cap**: scop presents with FIFO, which waits for the screen's refresh, so
+it can't show more frames than the screen draws (120 Hz → 120 fps). The number tells you scop
+keeps up with the screen; it does **not** tell you how fast the GPU could go, or which model
+is heavier. For that, compare frame times in a release build (or a present mode without the cap).
+
+**A-19.2** (1) `1 ÷ dt` changes every frame — tiny timing jitter makes it flicker between values
+you can't read. An average over 0.5 s is steady and closer to the truth. (2) The title would be
+set every frame, which is slow on some systems (macOS redraws the title bar); averaging means it
+changes twice a second, and only when the text differs.
+
+**A-19.3** Up to two frames are still in flight (§ 5), and they were recorded with the old
+model's buffers. Destroying them now means the GPU may read freed memory while finishing those
+frames: a **use-after-free on the GPU**, in the next few milliseconds after the drop. With
+validation on, yes: it reports a buffer **destroyed while still in use** by a submitted command
+buffer. Without validation, it's undefined — garbage, a crash, or nothing visible. Fix: wait
+(`device_wait_idle`) before destroying.
+
+**A-19.4** (1) The file is **inside out**: its faces list their corners clockwise seen from
+outside. (2) scop's **front/back is swapped**: the pipeline's `front_face` doesn't match the
+winding after the projection's y flip. Test: open a model you trust (the teapot or the cube) — if
+it's red outside too, the cause is scop's setting, not the file.
+
+**A-19.5** Stored depth is **not linear**: the perspective card squeezes far distances towards
+1, keeping most precision near the near plane. scop's near plane is tiny (1 % of the model's
+size), so the whole model lands around 0.99–1.0: almost the same white everywhere. scop uses the
+**linear distance** — `w` from the vertex shader — mapped over the model's own nearest–farthest
+range, so the full white-to-dark scale is used.
+
+## Section 20
+
+**A-20.1** Orbiting moves only the camera: the model and the light stay where they are, so the
+**same faces stay lit** — you walk round and see the lit side, then the dark side. Turning the model
+moves its faces relative to the light, so **which faces are lit changes** as it turns.
+
+**A-20.2** The camera **flips upside down** in one frame as it passes straight up: "up" (+y) and
+the view direction become the same line, so which way is up stops being defined, and on the far
+side it comes out reversed. The clamp (±89°) stops it just before.
+
+**A-20.3** The light looks **painted on**: the faces that were bright stay bright and the dark ones
+stay dark, however the model spins — the shader still thinks every face points where it did at
+the start.
+
+**A-20.4** Faces turned away from the light would get **zero** — pure black, invisible against the
+dark background, and the model's outline would vanish on its dark side. Ambient keeps every face
+at least dimly visible.
+
+**A-20.5** A corner holds **one** normal. With its own corners, each triangle's corners carry its
+face's normal, so the whole face has one brightness and edges stay crisp. Shared corners belong to
+several faces at once, so they'd need one **averaged** normal — brightness would blend across
+edges: **smooth shading**, rounded-looking, wrong for the logo's sharp corners.

@@ -6,6 +6,7 @@
 mod app;
 mod buffer;
 mod depth;
+mod fps;
 mod frames;
 mod gpu;
 mod input;
@@ -23,6 +24,7 @@ mod triangulate;
 
 // The whole public API.
 pub use app::{App, Flow, Frame, Gfx, GpuInfo, MeshId, PipelineId, TextureId};
+pub use fps::{FpsCounter, FpsReading};
 pub use input::{Input, Key};
 pub use maths::{Mat4, Vec3, Vec4};
 pub use mesh::{MeshData, Vertex};

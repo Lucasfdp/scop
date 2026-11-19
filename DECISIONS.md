@@ -273,3 +273,19 @@ so they keep their positions relative to each other.
 **Rejected:** one big § 19 (too much for one gate); `.mtl` colours and screenshot-to-TGA (least reuse).
 **Why:** the owner wants this engine groundwork done himself before the group projects (ft_newton, ft_vox), where it would otherwise be missing or written under time pressure.
 **Cost accepted:** more time on scop beyond what the bonus is graded on; the bonus grade itself only needs §§ 17–18. The skybox depends on § 20's camera, and instancing on § 20 too.
+
+## 2026-11-19 — § 19: FPS, drag & drop, debug colours
+**Chose:** `FpsCounter` in the engine (0.5 s window, FPS + frame time), title chosen by the
+app with `Frame::set_title`, applied only when the text changes. `App::update` gets
+`&mut Gfx` so meshes can be made mid-run; `Gfx::destroy_mesh` waits for the GPU
+(`device_wait_idle`) and empties the slot (`Vec<Option<Mesh>>`, ids never reused). A dropped
+`.obj` is loaded completely, uploaded, and only then are the old meshes destroyed. Push block
+`mat4 model + vec4 params` (80 bytes), params' meaning set by the app (`Frame::draw_with`);
+scop: blend, colour mode, depth range. Depth mode from `w` (linear), over the model's own range.
+**Rejected:** `1 ÷ dt` every frame (unreadable); a separate "files dropped" callback (later
+projects need meshes mid-run anyway); a deletion queue (drops are rare); engine fields named
+after scop's debug modes (couples the engine to scop); `gl_FragCoord.z` (non-linear, ≈ 1 everywhere).
+**Why:** each extra reuses an earlier section (§ 5 frames in flight, § 16 waiting, § 15 push
+block, § 9 `w`) and leaves the engine more general, not more scop-shaped.
+**Cost accepted:** a short pause on every drop; `update` now takes a third argument in every app.
+**Revisit if:** meshes are swapped every frame (ft_vox chunks) → a per-frame-slot deletion queue.

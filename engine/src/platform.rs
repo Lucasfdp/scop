@@ -72,6 +72,7 @@ impl From<GpuError> for RunError {
 pub fn run<A: App>(config: WindowConfig, app: A) -> Result<(), RunError> {
     let event_loop = EventLoop::new()?;
     let mut runner = Runner {
+        title: config.title.clone(),
         config,
         app,
         input: Input::default(),
@@ -88,9 +89,17 @@ pub fn run<A: App>(config: WindowConfig, app: A) -> Result<(), RunError> {
     }
 }
 
+/// The title to give the window, or `None` if there's nothing to change: the app
+/// asked for none this frame, or for the one already showing (§ 19, title throttling).
+fn title_to_set(current: &str, wanted: Option<String>) -> Option<String> {
+    wanted.filter(|title| title != current)
+}
+
 /// The engine's side of the loop: `winit` calls this, and this calls the app.
 struct Runner<A: App> {
     config: WindowConfig,
+    /// The title the window shows now, so it's only changed when it differs (§ 19).
+    title: String,
     app: A,
     input: Input,
     last_frame: Instant,
@@ -127,16 +136,23 @@ impl<A: App> Runner<A> {
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
 
-        let flow = self.app.update(&self.input, dt);
+        let Some(graphics) = &mut self.graphics else {
+            return;
+        };
+
+        // § 19: `update` gets `Gfx` too, so the app can swap meshes mid-run.
+        let flow = self.app.update(
+            &self.input,
+            dt,
+            &mut Gfx {
+                gpu: &mut graphics.gpu,
+            },
+        );
         self.input.end_frame();
         if flow == Flow::Exit {
             event_loop.exit();
             return;
         }
-
-        let Some(graphics) = &mut self.graphics else {
-            return;
-        };
 
         // § 16: the window changed size (or the last frame said "out of date"):
         // rebuild the swapchain and depth image at the current size first.
@@ -154,6 +170,12 @@ impl<A: App> Runner<A> {
         // The aspect of the image this frame will be drawn into, fresh every frame.
         let mut frame = Frame::new(graphics.gpu.aspect());
         self.app.draw(&mut frame);
+
+        // § 19: title throttling — only touch the window when the text changed.
+        if let Some(title) = title_to_set(&self.title, frame.title.take()) {
+            graphics.window.set_title(&title);
+            self.title = title;
+        }
 
         match graphics.gpu.draw_frame(&frame) {
             Ok(status) => {
@@ -225,6 +247,8 @@ impl<A: App> ApplicationHandler for Runner<A> {
                 MouseScrollDelta::LineDelta(_, lines) => self.input.scroll_lines(lines),
                 MouseScrollDelta::PixelDelta(pixels) => self.input.scroll_pixels(pixels.y as f32),
             },
+            // § 19: one event per file dragged onto the window.
+            WindowEvent::DroppedFile(path) => self.input.drop_file(path),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -243,5 +267,20 @@ impl<A: App> ApplicationHandler for Runner<A> {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_only_changes_when_the_text_does() {
+        assert_eq!(title_to_set("scop", None), None); // nothing asked
+        assert_eq!(title_to_set("scop", Some("scop".into())), None); // same text
+        assert_eq!(
+            title_to_set("scop", Some("scop — 120 fps".into())),
+            Some("scop — 120 fps".into())
+        );
     }
 }

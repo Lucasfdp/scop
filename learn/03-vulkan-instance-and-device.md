@@ -2,7 +2,7 @@
 section: 3
 slug: vulkan-instance-and-device
 tier: T2
-status: not-started
+status: done
 prereqs: [2]
 terms: [Vulkan loader, ICD, VkInstance, extension, layer, validation layer, debug messenger, VK_KHR_portability_enumeration, VK_KHR_portability_subset, physical device, queue family, logical device, handle, CreateInfo, VkResult, ash]
 ---

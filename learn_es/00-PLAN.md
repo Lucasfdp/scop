@@ -52,7 +52,7 @@ curriculum by luferna3.* Más Description, Instructions, Resources (con uso de I
 - [10pt] `.obj` complejos: caras cóncavas y no coplanares; renderizar la tetera original
   sin artefactos en los bordes.
 - [5pt] Textura sin estiramiento visible en algunas caras.
-- [10pt] Tus propios extras — **se deciden más adelante** (§ 19).
+- [10pt] Tus propios extras — elegidos el 2026-11-18: §§ 19–23 (comodidades, cámara + luz, recarga de shaders en caliente, instancing, skybox), más la imagen por objeto, los modos de vista y el zoom de § 18.
 
 ## Reparto de profundidad
 
@@ -83,35 +83,46 @@ por C/C++, raylib y mlx.
 | Transición suave color↔textura | 3 | 1 | 1 | 5 | T1 |
 | Bonus: caras cóncavas/no coplanares | 2 | 2 | 2 | 6 | T1 |
 | Bonus: mapeado de textura sin estiramiento | 2 | 2 | 2 | 6 | T1 |
+| Extra: FPS, arrastrar y soltar, colores de depuración | 1 | 2 | 1 | 4 | T1 |
+| Extra: cámara orbital + luz direccional | 2 | 3 | 3 | 8 | T2 (se reutiliza en ft_newton, ft_vox) |
+| Extra: recarga de shaders en caliente | 1 | 2 | 2 | 5 | T1 |
+| Extra: instancing | 2 | 3 | 3 | 8 | T2 (los bloques de ft_vox) |
+| Extra: skybox (cube map) | 2 | 2 | 2 | 6 | T1 |
 
 **Nota sobre el vehículo:** scop es un vehículo excelente para **el modelo de objetos de
 Vulkan y el pipeline de renderizado** — un solo objeto, sin distracciones. Es un mal
 vehículo para el **rendimiento** (una malla), la **profundidad matemática** (una cámara y
 una matriz de modelo) y la **iluminación**. Eso queda a propósito para ft_newton y ft_vox.
 
+**Actualización 2026-11-18 (propietario):** los extras §§ 19–23 introducen a propósito ya una primera cámara, una luz, instancing y un skybox, como base del motor antes de los proyectos en grupo. Se quedan en la profundidad que necesita scop; ft_newton y ft_vox profundizan más.
+
 ## Secciones
 
 | # | Fichero | Título | Nivel | Estado | Checkpoint |
 |---|---|---|---|---|---|
-| 1 | `01-rust-for-c-programmers.md` | Rust para quien viene de C | T2 | sin empezar | Workspace (`engine` + `scop`), lectura de fichero con `Result` |
-| 2 | `02-how-a-gpu-draws.md` | Cómo dibuja una GPU un triángulo | T2 | sin empezar | Ventana `winit`, event loop, Esc para salir |
-| 3 | `03-vulkan-instance-and-device.md` | Hablar con la GPU | T2 | sin empezar | Instancia + validation layers + dispositivo lógico |
-| 4 | `04-surface-and-swapchain.md` | Llevar imágenes a la pantalla | T2 | sin empezar | Swapchain creada, imágenes listadas |
-| 5 | `05-commands-and-sync.md` | Dar trabajo a la GPU, y esperar | T2 | sin empezar | Ventana limpiada a un color cada fotograma |
-| 6 | `06-shaders-and-pipeline.md` | Programas que se ejecutan en la GPU | T2 | sin empezar | Triángulo fijo en pantalla |
-| 7 | `07-buffers-and-gpu-memory.md` | Enviar datos a la GPU | T2 | sin empezar | Triángulo/quad desde vertex + index buffers |
-| 8 | `08-engine-architecture.md` | Separar motor y aplicación | T2 | sin empezar | Refactor: scop solo usa la API pública del motor |
-| 9 | `09-maths-for-3d.md` | Las matemáticas 3D justas | T1 | sin empezar | `Vec3`/`Mat4` propios + tests |
-| 10 | `10-uniforms-and-descriptors.md` | Pasar datos por fotograma a los shaders | T2 | sin empezar | Cubo girando en perspectiva |
-| 11 | `11-depth-buffer.md` | Qué está delante de qué | T2 | sin empezar | Cubo con oclusión correcta |
-| 12 | `12-obj-parser.md` | Leer ficheros `.obj` | T1 | sin empezar | El logo de 42 y la tetera cargan y se renderizan |
-| 13 | `13-faces-and-controls.md` | Caras grises y mover el modelo | T1 | sin empezar | Grises por cara, rotar/trasladar sobre el centro |
-| 14 | `14-textures.md` | Imágenes sobre superficies | T2 | sin empezar | Cargador TGA propio, modelo texturizado |
-| 15 | `15-smooth-transition.md` | Fundir color y textura | T1 | sin empezar | Tecla con transición suave |
-| 16 | `16-mandatory-finish.md` | Dejar la parte obligatoria perfecta | T1 | sin empezar | Redimensionado, `make` de una línea, README, autoevaluación |
-| 17 | `17-bonus-complex-obj.md` | Caras cóncavas y no planas | T1 | sin empezar | La tetera original se ve limpia |
-| 18 | `18-bonus-texture-mapping.md` | Texturas sin estiramiento | T1 | sin empezar | Ninguna cara estirada |
-| 19 | `19-bonus-extras.md` | Tus propios extras | por decidir | sin empezar | Se decide más adelante |
+| 1 | `01-rust-for-c-programmers.md` | Rust para quien viene de C | T2 | hecho | Workspace (`engine` + `scop`), lectura de fichero con `Result` |
+| 2 | `02-how-a-gpu-draws.md` | Cómo dibuja una GPU un triángulo | T2 | hecho | Ventana `winit`, event loop, Esc para salir |
+| 3 | `03-vulkan-instance-and-device.md` | Hablar con la GPU | T2 | hecho | Instancia + validation layers + dispositivo lógico |
+| 4 | `04-surface-and-swapchain.md` | Llevar imágenes a la pantalla | T2 | hecho | Swapchain creada, imágenes listadas |
+| 5 | `05-commands-and-sync.md` | Dar trabajo a la GPU, y esperar | T2 | hecho | Ventana limpiada a un color cada fotograma |
+| 6 | `06-shaders-and-pipeline.md` | Programas que se ejecutan en la GPU | T2 | hecho | Triángulo fijo en pantalla |
+| 7 | `07-buffers-and-gpu-memory.md` | Enviar datos a la GPU | T2 | hecho | Triángulo/quad desde vertex + index buffers |
+| 8 | `08-engine-architecture.md` | Separar motor y aplicación | T2 | hecho | Refactor: scop solo usa la API pública del motor |
+| 9 | `09-maths-for-3d.md` | Las matemáticas 3D justas | T1 | hecho | `Vec3`/`Mat4` propios + tests |
+| 10 | `10-uniforms-and-descriptors.md` | Pasar datos por fotograma a los shaders | T2 | hecho | Cubo girando en perspectiva |
+| 11 | `11-depth-buffer.md` | Qué está delante de qué | T2 | hecho | Cubo con oclusión correcta |
+| 12 | `12-obj-parser.md` | Leer ficheros `.obj` | T1 | hecho | El logo de 42 y la tetera cargan y se renderizan |
+| 13 | `13-faces-and-controls.md` | Caras grises y mover el modelo | T1 | hecho | Grises por cara, rotar/trasladar sobre el centro |
+| 14 | `14-textures.md` | Imágenes sobre superficies | T2 | hecho | Cargador TGA propio, modelo texturizado |
+| 15 | `15-smooth-transition.md` | Fundir color y textura | T1 | hecho | Tecla con transición suave |
+| 16 | `16-mandatory-finish.md` | Dejar la parte obligatoria perfecta | T1 | hecho | Redimensionado, `make` de una línea, README, autoevaluación |
+| 17 | `17-bonus-complex-obj.md` | Caras cóncavas y no planas | T1 | hecho | La tetera original se ve limpia |
+| 18 | `18-bonus-texture-mapping.md` | Texturas sin estiramiento | T1 | hecho | Ninguna cara estirada |
+| 19 | `19-bonus-quality-of-life.md` | Comodidades: FPS, arrastrar y soltar, colores de depuración | T1 | en curso | FPS en el título, soltar un `.obj` para cargarlo, modos de color de depuración (orientación / profundidad) |
+| 20 | `20-bonus-camera-and-lighting.md` | Una cámara que manejas, y luz | T2 | sin empezar | Cámara orbital con el ratón; una luz direccional que sombrea las caras según su ángulo |
+| 21 | `21-bonus-shader-hot-reload.md` | Shaders que se recargan en marcha | T1 | sin empezar | Editar un shader y ver el cambio sin reiniciar |
+| 22 | `22-bonus-instancing.md` | Cientos de copias en un solo draw | T2 | sin empezar | Cientos de logos girando con una mesh y un draw |
+| 23 | `23-bonus-skybox.md` | Un cielo alrededor de la escena | T1 | sin empezar | Skybox con cube map, más un modo cromado (reflectante) |
 
 Las secciones 3–19 se escriben cuando llegues a ellas, para que el plan se adapte a lo
 que resulte difícil.
@@ -120,5 +131,8 @@ que resulte difícil.
 <!-- Se rellena según se completan secciones. Fuente: DECISIONS.md + trampas de cada sección. -->
 
 ## Aplazado / v2
+- Motor (ft_vox+): saltarse el staging cuando la GPU ofrece un tipo de memoria
+  `DEVICE_LOCAL | HOST_VISIBLE` (memoria unificada como la del M2, o Resizable BAR en
+  tarjetas de PC) — escribir directamente.
 - Iluminación (candidata a extra del bonus, se decide en § 19).
 - Ajuste del present mode de la swapchain, más de 2 fotogramas en vuelo.

@@ -2,11 +2,13 @@
 //! show and how keys behave; the engine does everything GPU- and window-related.
 
 use std::env;
+use std::path::Path;
 use std::process::ExitCode;
 
 use engine::{
-    App, DrawStyle, Flow, Frame, Gfx, GpuInfo, Image, Input, Key, Mat4, MeshData, MeshId, ObjModel,
-    PipelineId, RunError, Shaders, TextureId, Vec3, Vertex, WindowConfig,
+    App, DrawStyle, Flow, FpsCounter, FpsReading, Frame, Gfx, GpuInfo, Image, Input, Key, Mat4,
+    MeshData, MeshId, ObjModel, PipelineId, RunError, Shaders, TextureId, Vec3, Vertex,
+    WindowConfig,
 };
 
 /// The mesh shaders, compiled by `build.rs` and embedded in the binary.
@@ -38,6 +40,14 @@ const FOV_MAX_DEGREES: f32 = 100.0;
 const ZOOM_PER_NOTCH: f32 = 0.9;
 /// Z / X held: how many notches' worth of zoom per second.
 const ZOOM_KEY_NOTCHES_PER_SECOND: f32 = 6.0;
+/// How often the FPS in the title is updated, in seconds (§ 19, Q-19.2).
+const FPS_WINDOW: f32 = 0.5;
+/// What C cycles through (§ 19). The index is what the fragment shader gets.
+const COLOUR_MODES: [&str; 3] = [
+    "normal",
+    "facing (blue front, red back)",
+    "depth (near white, far dark)",
+];
 /// The draw styles V cycles through, in order (§ 18). Ones the GPU can't do are skipped.
 const STYLES: [DrawStyle; 3] = [DrawStyle::Fill, DrawStyle::Wireframe, DrawStyle::Points];
 /// Background colour (linear RGBA): very dark, so the greys stand out.
@@ -53,10 +63,12 @@ controls:
   T           fade between grey faces and the picture
   N           rotate which object gets which picture
   V           solid → wireframe → points
+  C           colours: normal → facing → depth
   wheel, Z/X  zoom in / out (field of view)
   Space       pause / resume the automatic spin
   R           reset (placement and zoom)
-  Esc         quit";
+  Esc         quit
+  drop a .obj on the window to open it";
 
 /// Where the model is and how it's turned (§ 13: *model state*). Keys change these
 /// numbers in `update`; `draw` builds the model matrix from them.
@@ -143,12 +155,9 @@ fn zoom(fov_degrees: f32, notches: f32) -> f32 {
 /// scop's state. The GPU tickets (pipelines, meshes, textures) are empty until the
 /// engine calls `setup`.
 struct Scop {
-    /// One mesh per object in the file (§ 18), ready to upload in `setup`.
-    object_meshes: Vec<MeshData>,
-    /// Middle of the model's bounding box: what it turns around (§ 12, Q-9.3).
-    centre: Vec3,
-    /// Size of the model: camera distance and movement speed scale with it.
-    radius: f32,
+    /// The model being shown: its name, CPU-side meshes, centre and size. Its meshes
+    /// are uploaded in `setup`, and replaced when a file is dropped (§ 19).
+    model: LoadedModel,
     placement: Placement,
     fade: Fade,
     /// Vertical field of view in degrees: the zoom (§ 18).
@@ -163,6 +172,125 @@ struct Scop {
     style: usize,
     meshes: Vec<MeshId>,
     textures: Vec<TextureId>,
+    /// § 19: frames per second, for the title.
+    fps: FpsCounter,
+    /// The latest reading; `None` for the first half-second.
+    fps_reading: Option<FpsReading>,
+    /// Index into `COLOUR_MODES` (C).
+    colour_mode: usize,
+}
+
+/// A model read from a file and turned into meshes, but not uploaded yet (§ 19).
+/// Loading builds one of these *before* anything is replaced, so a broken file
+/// leaves the model on screen untouched.
+struct LoadedModel {
+    /// The file's name, for the title.
+    name: String,
+    /// One mesh per object in the file (§ 18). Emptied once uploaded.
+    object_meshes: Vec<MeshData>,
+    /// Middle of the model's bounding box: what it turns around (§ 12, Q-9.3).
+    centre: Vec3,
+    /// Size of the model: camera distance and movement speed scale with it.
+    radius: f32,
+}
+
+/// Reads and parses `path` and builds its meshes. Prints the model's stats on success;
+/// the error is returned for the caller to report.
+fn load_model(path: &Path) -> Result<LoadedModel, String> {
+    let shown = path.display();
+    let text = std::fs::read_to_string(path).map_err(|err| format!("{shown}: {err}"))?;
+    let obj = engine::parse_obj(&text).map_err(|err| format!("{shown}: {err}"))?;
+    let objects = obj.object_names.len();
+    println!(
+        "{shown}: {} corners, {} triangles, {} open edges, {objects} {} ({})",
+        obj.positions.len(),
+        obj.triangles.len(),
+        obj.open_edges(), // 0 = sealed; more = the surface has gaps you can see past (§ 17)
+        if objects == 1 { "object" } else { "objects" },
+        obj.object_names.join(", ")
+    );
+    let name = path.file_name().unwrap_or(path.as_os_str());
+    Ok(LoadedModel {
+        name: name.to_string_lossy().into_owned(),
+        object_meshes: object_meshes(&obj),
+        centre: obj.centre(),
+        // A model that's a single point would put the camera on top of it.
+        radius: obj.radius().max(0.001),
+    })
+}
+
+impl Scop {
+    /// A file was dropped on the window (§ 19). Anything that goes wrong is printed,
+    /// and the current model stays: a bad drop never closes the viewer.
+    fn open_dropped(&mut self, path: &Path, gfx: &mut Gfx<'_>) {
+        let is_obj = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("obj"));
+        if !is_obj {
+            eprintln!("scop: {}: drop a .obj file", path.display());
+            return;
+        }
+        let swapped = load_model(path).and_then(|model| {
+            self.swap_model(model, gfx)
+                .map_err(|err| format!("{}: {err}", path.display()))
+        });
+        if let Err(err) = swapped {
+            eprintln!("scop: {err}");
+        }
+    }
+
+    /// Uploads `model`'s meshes, then destroys the old ones (Q-19.3). New first: if an
+    /// upload fails, the old model is still complete and stays on screen.
+    fn swap_model(&mut self, mut model: LoadedModel, gfx: &mut Gfx<'_>) -> Result<(), RunError> {
+        let mut new_meshes = Vec::new();
+        for mesh in &model.object_meshes {
+            match gfx.create_mesh(mesh) {
+                Ok(id) => new_meshes.push(id),
+                Err(err) => {
+                    // Undo the half-done upload. Errors here are secondary: report the first.
+                    for id in new_meshes {
+                        let _ = gfx.destroy_mesh(id);
+                    }
+                    return Err(err);
+                }
+            }
+        }
+        // Each destroy waits for the GPU (frames in flight may still draw the old
+        // model); the first wait drains it, so the others return straight away.
+        for id in std::mem::replace(&mut self.meshes, new_meshes) {
+            gfx.destroy_mesh(id)?;
+        }
+        model.object_meshes = Vec::new(); // uploaded: the CPU copy isn't needed any more
+        self.model = model;
+        // A new model starts like scop does: placed, unzoomed. Pictures, view and
+        // colour mode stay as they were.
+        self.placement = Placement::START;
+        self.fov_y = FOV_Y_DEGREES;
+        Ok(())
+    }
+
+    /// The camera's distance from the model's centre (§ 12 framing). Always from the
+    /// starting field of view, so zooming doesn't move the camera (§ 18).
+    fn camera_distance(&self) -> f32 {
+        self.model.radius / (FOV_Y_DEGREES.to_radians() / 2.0).sin()
+    }
+}
+
+/// The window title (§ 19): the file, then the FPS once there's a reading.
+fn window_title(name: &str, reading: Option<FpsReading>) -> String {
+    match reading {
+        Some(r) => format!("scop — {name} — {:.0} fps ({:.1} ms)", r.fps, r.frame_ms),
+        None => format!("scop — {name}"),
+    }
+}
+
+/// The model's nearest and farthest distance from the camera, for depth mode (§ 19).
+/// `distance` = camera to the model's centre at the start; W / S move the model by
+/// `position_z` towards the camera. Turning doesn't matter: the model always fits in a
+/// sphere of `radius` around its centre.
+fn depth_range(distance: f32, position_z: f32, radius: f32) -> (f32, f32) {
+    let centre = distance - position_z;
+    ((centre - radius).max(0.0), centre + radius)
 }
 
 impl App for Scop {
@@ -181,18 +309,31 @@ impl App for Scop {
         let (smallest, largest) = info.point_size_range;
         println!("point sizes: {smallest}..{largest} px");
         println!("{CONTROLS}");
-        for mesh in &self.object_meshes {
+        for mesh in &self.model.object_meshes {
             self.meshes.push(gfx.create_mesh(mesh)?);
         }
+        self.model.object_meshes = Vec::new(); // uploaded
         for picture in &self.pictures {
             self.textures.push(gfx.create_texture(picture)?);
         }
         Ok(())
     }
 
-    fn update(&mut self, input: &Input, dt: f32) -> Flow {
+    fn update(&mut self, input: &Input, dt: f32, gfx: &mut Gfx<'_>) -> Flow {
         if input.pressed(Key::Escape) {
             return Flow::Exit;
+        }
+        // § 19: a new reading every half-second; the title shows the latest.
+        if let Some(reading) = self.fps.tick(dt) {
+            self.fps_reading = Some(reading);
+        }
+        // § 19: files dropped on the window. Only the last .obj stays on screen.
+        for path in input.dropped_files() {
+            self.open_dropped(path, gfx);
+        }
+        if input.pressed(Key::C) {
+            self.colour_mode = (self.colour_mode + 1) % COLOUR_MODES.len();
+            println!("colours: {}", COLOUR_MODES[self.colour_mode]);
         }
         let p = &mut self.placement;
 
@@ -218,7 +359,7 @@ impl App for Scop {
         self.fade.step(dt);
 
         // Continuous: `held`, × dt so the speed is per second at any frame rate.
-        let step = MOVE_SPEED * self.radius * dt;
+        let step = MOVE_SPEED * self.model.radius * dt;
         p.position = p.position
             + axis_input(
                 input,
@@ -243,14 +384,16 @@ impl App for Scop {
 
     fn draw(&self, frame: &mut Frame) {
         frame.clear(BACKGROUND);
+        frame.set_title(window_title(&self.model.name, self.fps_reading)); // the engine only applies it when it changes
 
         // Framing: far enough back that a sphere of `radius` fits the view (§ 12).
         // Always from the *starting* field of view: if it used the zoomed one, the
         // camera would back off exactly as much as the zoom magnifies — no zoom at all.
-        let distance = self.radius / (FOV_Y_DEGREES.to_radians() / 2.0).sin();
-        let near = self.radius * 0.01; // as large as possible, for depth precision (§ 11)
+        let radius = self.model.radius;
+        let distance = self.camera_distance();
+        let near = radius * 0.01; // as large as possible, for depth precision (§ 11)
         // Room for the model to be pushed back with − (it can go a few sizes away).
-        let far = distance + self.radius * 20.0;
+        let far = distance + radius * 20.0;
 
         // Camera, once per frame (the noticeboard). Aspect is read fresh every frame.
         // The zoom only changes the lens (§ 18): same camera, narrower view.
@@ -260,14 +403,22 @@ impl App for Scop {
 
         // The model's placement (the sticky note): one for the whole file, so the
         // objects keep their places relative to each other.
-        let model = self.placement.matrix(self.centre);
+        let model = self.placement.matrix(self.model.centre);
         let Some(&(_, pipeline)) = self.pipelines.get(self.style) else {
             return;
         };
+        // § 19: the four push params, in the order the fragment shader reads them.
+        let (nearest, farthest) = depth_range(distance, self.placement.position.z, radius);
+        let params = [
+            self.fade.blend(),
+            self.colour_mode as f32,
+            nearest,
+            farthest,
+        ];
         // One draw per object, each with its own picture (§ 18, Q-18.3).
         for (i, &mesh) in self.meshes.iter().enumerate() {
             if let Some(texture) = picture_for(i, self.picture_shift, &self.textures) {
-                frame.draw_textured(pipeline, mesh, texture, model, self.fade.blend());
+                frame.draw_with(pipeline, mesh, texture, model, params);
             }
         }
     }
@@ -300,28 +451,14 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let text = match engine::read_file(path) {
-        Ok(text) => text,
+    // The same loader a dropped file uses (§ 19).
+    let model = match load_model(Path::new(path)) {
+        Ok(model) => model,
         Err(err) => {
-            eprintln!("scop: {path}: {err}");
+            eprintln!("scop: {err}");
             return ExitCode::FAILURE;
         }
     };
-    let obj = match engine::parse_obj(&text) {
-        Ok(obj) => obj,
-        Err(err) => {
-            eprintln!("scop: {path}: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-    println!(
-        "{path}: {} corners, {} triangles, {} open edges, {} objects ({})",
-        obj.positions.len(),
-        obj.triangles.len(),
-        obj.open_edges(), // 0 = sealed; more = the surface has gaps you can see past (§ 17)
-        obj.object_names.len(),
-        obj.object_names.join(", ")
-    );
 
     // The pictures: every .tga after the model (§ 18), or the embedded one (§ 14).
     // Our own TGA loader either way; a broken picture is reported like a broken model.
@@ -346,17 +483,14 @@ fn main() -> ExitCode {
     }
 
     let config = WindowConfig {
-        title: String::from("scop"),
+        title: window_title(&model.name, None),
         width: 1280,
         height: 720,
     };
     let scop = Scop {
-        object_meshes: object_meshes(&obj),
+        model,
         pictures,
         picture_shift: 0,
-        centre: obj.centre(),
-        // A model that's a single point would put the camera on top of it.
-        radius: obj.radius().max(0.001),
         placement: Placement::START,
         fade: Fade::GREY,
         fov_y: FOV_Y_DEGREES,
@@ -364,6 +498,9 @@ fn main() -> ExitCode {
         style: 0,
         meshes: Vec::new(),
         textures: Vec::new(),
+        fps: FpsCounter::new(FPS_WINDOW),
+        fps_reading: None,
+        colour_mode: 0,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -655,6 +792,46 @@ mod tests {
         assert_eq!(for_objects(2), for_objects(0)); // N twice: back where it started
         assert_eq!(picture_for(5, 3, &two[..1]), Some(two[0])); // one picture: everyone
         assert_eq!(picture_for::<char>(0, 0, &[]), None);
+    }
+
+    #[test]
+    fn a_broken_file_is_an_error_not_a_new_model() {
+        // § 19: a dropped file goes through `load_model` first; only `Ok` replaces
+        // anything, so a broken drop leaves the current model as it was.
+        let err = load_model(Path::new("../resources/test/broken.obj"))
+            .err()
+            .unwrap();
+        assert!(
+            err.contains("broken.obj") && err.contains("line 7"),
+            "{err}"
+        );
+        assert!(load_model(Path::new("../resources/missing.obj")).is_err());
+        let logo = load_model(Path::new("../resources/42.obj")).unwrap();
+        assert_eq!(logo.name, "42.obj"); // the file name only, for the title
+        assert_eq!(logo.object_meshes.len(), 1);
+    }
+
+    #[test]
+    fn title_shows_the_file_then_the_fps() {
+        assert_eq!(window_title("42.obj", None), "scop — 42.obj");
+        let reading = FpsReading {
+            fps: 119.6,
+            frame_ms: 8.36,
+        };
+        assert_eq!(
+            window_title("42.obj", Some(reading)),
+            "scop — 42.obj — 120 fps (8.4 ms)"
+        );
+    }
+
+    #[test]
+    fn depth_range_follows_the_model() {
+        // Centre 10 away, radius 2: nearest point 8, farthest 12.
+        assert_eq!(depth_range(10.0, 0.0, 2.0), (8.0, 12.0));
+        // W moved it 3 closer: the whole range comes 3 closer.
+        assert_eq!(depth_range(10.0, 3.0, 2.0), (5.0, 9.0));
+        // Pushed right up to the camera: never a negative distance.
+        assert_eq!(depth_range(10.0, 9.0, 2.0).0, 0.0);
     }
 
     #[test]
