@@ -14,6 +14,13 @@ layout(location = 1) in vec2 uv;          // this pixel's spot on the picture
 layout(location = 0) out vec4 out_colour; // slot 0 -> colour attachment 0
 
 void main() {
+    // § 18: keep the picture's squares square. The UVs use one scale for u and v,
+    // which only suits a square picture. For any picture, use its shorter side as
+    // the unit: wide → u × H/W, tall → v × W/H. Same texels per unit both ways, and
+    // both stay within 0..1 (the long side is cropped, never tiled).
+    // Done here, not in the mesh, because N hands each object a different picture.
+    vec2 size = vec2(textureSize(picture, 0));
+    vec2 square_uv = uv * min(size.x, size.y) / size;
     // mix(a, b, t) = a + (b − a) × t: all grey at 0, all picture at 1 (§ 15).
-    out_colour = mix(vec4(colour, 1.0), texture(picture, uv), push.blend);
+    out_colour = mix(vec4(colour, 1.0), texture(picture, square_uv), push.blend);
 }

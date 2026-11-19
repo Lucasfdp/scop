@@ -1,9 +1,11 @@
-//! Reading Wavefront `.obj` files (§ 12): corners (`v`) and faces (`f`), nothing else.
+//! Reading Wavefront `.obj` files (§ 12): corners (`v`), faces (`f`) and, since § 18,
+//! object boundaries (`o` / `g`).
 //!
 //! - Corners are numbered from 1 in the file; the output is 0-based, ready for the GPU.
 //! - Faces with more than 3 corners are split by ear clipping (§ 17,
 //!   `triangulate.rs`): correct for concave and bent faces too.
-//! - Every other line (`#`, `o`, `g`, `s`, `mtllib`, `usemtl`, `vt`, `vn`, `l`, …) is skipped.
+//! - `o name` and `g name` start a new object (§ 18); a file without them is one object.
+//! - Every other line (`#`, `s`, `mtllib`, `usemtl`, `vt`, `vn`, `l`, …) is skipped.
 //! - A broken file gives an `ObjError` with its line number, never a panic.
 
 use std::fmt;
@@ -20,6 +22,11 @@ pub struct ObjModel {
     /// For each triangle, which face line (counted from 0) it came from: a quad's two
     /// triangles share one number, so they can share one colour (§ 13).
     pub triangle_faces: Vec<u32>,
+    /// For each triangle, which object (counted from 0) it belongs to (§ 18).
+    pub triangle_objects: Vec<u32>,
+    /// One name per object, from its `o` / `g` line; `"default"` when the file has none.
+    /// Every object has at least one triangle.
+    pub object_names: Vec<String>,
     /// Smallest x, y and z of any corner.
     pub min: Vec3,
     /// Largest x, y and z of any corner.
@@ -53,6 +60,19 @@ impl ObjModel {
             }
         }
         uses.values().filter(|&&n| n == 1).count()
+    }
+
+    /// The bounding box of only `object`'s corners (§ 18: each object's picture is
+    /// fitted to its own box). `None` if there's no such object.
+    pub fn object_box(&self, object: u32) -> Option<(Vec3, Vec3)> {
+        let mut corners = self
+            .triangles
+            .iter()
+            .zip(&self.triangle_objects)
+            .filter(|&(_, &o)| o == object)
+            .flat_map(|(t, _)| t.iter().map(|&c| self.positions[c as usize]));
+        let first = corners.next()?;
+        Some(corners.fold((first, first), grow_box))
     }
 
     /// Half the bounding box's diagonal: a sphere this big around `centre` holds
@@ -115,6 +135,9 @@ pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
     let mut triangles: Vec<[u32; 3]> = Vec::new();
     let mut triangle_faces: Vec<u32> = Vec::new();
     let mut face_count: u32 = 0;
+    let mut triangle_objects: Vec<u32> = Vec::new();
+    // Object 0 exists from the start, so faces before any `o` line have a home.
+    let mut object_names: Vec<String> = vec![String::from("default")];
 
     // `lines()` also strips Windows "\r\n" endings. Editors count lines from 1.
     for (number, line) in text.lines().enumerate().map(|(i, l)| (i + 1, l)) {
@@ -133,11 +156,31 @@ pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
                     return Err(error(ObjErrorKind::TooFewCorners(corners.len())));
                 }
                 // Ear clipping (§ 17); plain triangles come back as they are.
+                let object = (object_names.len() - 1) as u32; // the latest one
                 for triangle in triangulate(&positions, &corners) {
                     triangles.push(triangle);
                     triangle_faces.push(face_count);
+                    triangle_objects.push(object);
                 }
                 face_count += 1;
+            }
+            Some("o" | "g") => {
+                // The rest of the line is the name (names may contain spaces).
+                let name = words.collect::<Vec<_>>().join(" ");
+                let name = if name.is_empty() {
+                    String::from("unnamed")
+                } else {
+                    name
+                };
+                // The current object has no faces yet (e.g. `o` right at the top, or
+                // `o Cube` followed by `g sides`): rename it instead of leaving it empty.
+                let current_is_empty =
+                    triangle_objects.last() != Some(&((object_names.len() - 1) as u32));
+                if current_is_empty {
+                    *object_names.last_mut().expect("object 0 always exists") = name;
+                } else {
+                    object_names.push(name);
+                }
             }
             _ => {} // blank, comment, or a line type scop doesn't need
         }
@@ -149,11 +192,17 @@ pub fn parse_obj(text: &str) -> Result<ObjModel, ObjError> {
             kind: ObjErrorKind::NoFaces,
         });
     }
+    // An `o` line after the last face would leave an object with nothing in it.
+    if triangle_objects.last() != Some(&((object_names.len() - 1) as u32)) {
+        object_names.pop();
+    }
     let (min, max) = bounding_box(&positions);
     Ok(ObjModel {
         positions,
         triangles,
         triangle_faces,
+        triangle_objects,
+        object_names,
         min,
         max,
     })
@@ -195,12 +244,15 @@ fn corner_index(token: &str, defined: usize) -> Result<u32, ObjErrorKind> {
 fn bounding_box(positions: &[Vec3]) -> (Vec3, Vec3) {
     // Faces exist (checked by the caller), so there is at least one corner.
     let first = positions[0];
-    positions.iter().fold((first, first), |(min, max), p| {
-        (
-            Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z)),
-            Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z)),
-        )
-    })
+    positions.iter().copied().fold((first, first), grow_box)
+}
+
+/// A box, grown just enough to also hold `p`.
+fn grow_box((min, max): (Vec3, Vec3), p: Vec3) -> (Vec3, Vec3) {
+    (
+        Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z)),
+        Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z)),
+    )
 }
 
 #[cfg(test)]
@@ -248,6 +300,36 @@ mod tests {
         // face 0: one triangle; face 1: a quad → two triangles; face 2: one triangle.
         assert_eq!(model.triangle_faces, vec![0, 1, 1, 2]);
         assert_eq!(model.triangle_faces.len(), model.triangles.len());
+    }
+
+    #[test]
+    fn o_and_g_lines_split_objects() {
+        // No o/g lines: one object, called "default".
+        let one = parse_obj(&format!("{SQUARE}f 1 2 3\nf 1 3 4\n")).unwrap();
+        assert_eq!(one.object_names, vec!["default"]);
+        assert_eq!(one.triangle_objects, vec![0, 0]);
+        // `o` before any face renames object 0; `g` after faces starts object 1;
+        // `o Cube` straight after `g` (no faces between) renames it; a trailing `o`
+        // with nothing after it is dropped.
+        let text = format!("o first\n{SQUARE}f 1 2 3\ng\no second one\nf 1 2 3 4\no empty\n");
+        let model = parse_obj(&text).unwrap();
+        assert_eq!(model.object_names, vec!["first", "second one"]);
+        assert_eq!(model.triangle_objects, vec![0, 1, 1]); // the quad's 2 triangles
+        assert_eq!(model.triangle_objects.len(), model.triangles.len());
+    }
+
+    #[test]
+    fn object_box_covers_only_that_object() {
+        let text = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 5 5 5\nv 6 5 5\nv 5 7 5\n\
+                    o a\nf 1 2 3\no b\nf 4 5 6\n";
+        let model = parse_obj(text).unwrap();
+        assert_eq!(
+            model.object_box(0),
+            Some((Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)))
+        );
+        let b = (Vec3::new(5.0, 5.0, 5.0), Vec3::new(6.0, 7.0, 5.0));
+        assert_eq!(model.object_box(1), Some(b));
+        assert_eq!(model.object_box(2), None);
     }
 
     #[test]
@@ -336,6 +418,13 @@ mod tests {
         let concave = parse_obj(&read("concave.obj")).unwrap();
         assert_eq!(concave.triangles.len(), 20 + 36);
         assert_eq!(concave.open_edges(), 0);
+        // § 18: two objects, one per prism.
+        assert_eq!(concave.object_names, vec!["L_prism", "star_prism"]);
+        let in_object = |o| concave.triangle_objects.iter().filter(|&&t| t == o).count();
+        assert_eq!((in_object(0), in_object(1)), (20, 36));
+        // `o Cube`, then `g sides`, `g caps`: Cube has no faces of its own → 2 objects.
+        let cube = parse_obj(&read("cube_vt_vn.obj")).unwrap();
+        assert_eq!(cube.object_names, vec!["sides", "caps"]);
         let err = parse_obj(&read("broken.obj")).unwrap_err();
         assert_eq!(err.line, 7);
         assert!(matches!(

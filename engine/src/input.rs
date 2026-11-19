@@ -103,11 +103,17 @@ impl Key {
     }
 }
 
-/// Keyboard state for one frame.
+/// How many trackpad pixels count as one mouse-wheel notch (§ 18: *scroll delta*).
+/// Mice report notches ("lines"); trackpads report pixels, many per gesture.
+const PIXELS_PER_LINE: f32 = 40.0;
+
+/// Keyboard and mouse-wheel state for one frame.
 #[derive(Debug, Default)]
 pub struct Input {
     held: HashSet<Key>,
     pressed: HashSet<Key>,
+    /// Wheel movement since the last frame, in notches.
+    scroll: f32,
 }
 
 impl Input {
@@ -122,6 +128,23 @@ impl Input {
         self.pressed.contains(&key)
     }
 
+    /// How far the mouse wheel moved since the last frame, in notches (§ 18).
+    /// Positive = away from you (up); 0 when it didn't move. Trackpads are converted
+    /// to notches too, so one number works for both.
+    pub fn scroll(&self) -> f32 {
+        self.scroll
+    }
+
+    /// A wheel movement in notches (`lines`), as a mouse reports it.
+    pub(crate) fn scroll_lines(&mut self, lines: f32) {
+        self.scroll += lines; // several events can arrive between two frames
+    }
+
+    /// A wheel movement in pixels, as a trackpad reports it.
+    pub(crate) fn scroll_pixels(&mut self, pixels: f32) {
+        self.scroll_lines(pixels / PIXELS_PER_LINE);
+    }
+
     pub(crate) fn key_down(&mut self, key: Key) {
         // `insert` returns false if the key was already held: that's auto-repeat.
         if self.held.insert(key) {
@@ -133,9 +156,10 @@ impl Input {
         self.held.remove(&key);
     }
 
-    /// Called after the app's `update`: "pressed" only lasts one frame.
+    /// Called after the app's `update`: "pressed" and the scroll only last one frame.
     pub(crate) fn end_frame(&mut self) {
         self.pressed.clear();
+        self.scroll = 0.0;
     }
 }
 
@@ -154,5 +178,16 @@ mod tests {
         assert!(!input.pressed(Key::Space) && input.held(Key::Space));
         input.key_up(Key::Space);
         assert!(!input.held(Key::Space));
+    }
+
+    #[test]
+    fn scroll_adds_up_within_a_frame_then_resets() {
+        let mut input = Input::default();
+        input.scroll_lines(1.0);
+        input.scroll_lines(1.0);
+        input.scroll_pixels(-PIXELS_PER_LINE); // a trackpad: one notch's worth back
+        assert_eq!(input.scroll(), 1.0);
+        input.end_frame();
+        assert_eq!(input.scroll(), 0.0);
     }
 }

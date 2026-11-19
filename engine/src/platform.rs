@@ -8,7 +8,7 @@ use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::error::{EventLoopError, OsError};
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
@@ -219,6 +219,12 @@ impl<A: App> ApplicationHandler for Runner<A> {
                     graphics.window.request_redraw(); // restart the frame loop
                 }
             }
+            // § 18: the mouse wheel (or a two-finger trackpad swipe). Only the
+            // vertical part is used.
+            WindowEvent::MouseWheel { delta, .. } => match delta {
+                MouseScrollDelta::LineDelta(_, lines) => self.input.scroll_lines(lines),
+                MouseScrollDelta::PixelDelta(pixels) => self.input.scroll_pixels(pixels.y as f32),
+            },
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {

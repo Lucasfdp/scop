@@ -19,7 +19,7 @@ use crate::buffer::Uploader;
 use crate::depth::DepthImage;
 use crate::frames::{self, Draw, DrawList, FRAMES_IN_FLIGHT, FrameTarget, Frames};
 use crate::mesh::{Mesh, MeshData};
-use crate::pipeline::{Pipeline, Shaders};
+use crate::pipeline::{DrawStyle, Pipeline, Shaders};
 use crate::shader_inputs::{ShaderInputs, push_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
@@ -108,6 +108,8 @@ pub(crate) struct GpuContext {
     swapchain_loader: khr::swapchain::Device,
     swapchain: Swapchain,
     rendering_loader: khr::dynamic_rendering::Device,
+    /// § 18: whether `fillModeNonSolid` was enabled at device creation (wireframe).
+    wireframe: bool,
     memory_types: vk::PhysicalDeviceMemoryProperties,
     frames: Frames,
     inputs: ShaderInputs,
@@ -202,7 +204,8 @@ impl GpuContext {
 
         let (physical_device, queue_family_index) =
             pick_physical_device(&instance, &surface_loader, surface).map_err(fail)?;
-        let device = create_device(&instance, physical_device, queue_family_index).map_err(fail)?;
+        let (device, wireframe) =
+            create_device(&instance, physical_device, queue_family_index).map_err(fail)?;
 
         // SAFETY: family `queue_family_index` was requested with 1 queue, so index 0 exists.
         let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
@@ -302,6 +305,7 @@ impl GpuContext {
             swapchain_loader,
             swapchain,
             rendering_loader,
+            wireframe,
             memory_types,
             frames,
             inputs,
@@ -312,14 +316,35 @@ impl GpuContext {
         })
     }
 
-    /// Builds a pipeline for the swapchain's format and returns its ticket.
-    pub(crate) fn create_pipeline(&mut self, shaders: Shaders) -> Result<PipelineId, GpuError> {
+    /// Whether this device can draw in `style` (§ 18). Fill and points always;
+    /// wireframe only if `fillModeNonSolid` was enabled at device creation.
+    pub(crate) fn supports(&self, style: DrawStyle) -> bool {
+        match style {
+            DrawStyle::Fill | DrawStyle::Points => true,
+            DrawStyle::Wireframe => self.wireframe,
+        }
+    }
+
+    /// Builds a pipeline drawing in `style` for the swapchain's format and returns
+    /// its ticket.
+    pub(crate) fn create_pipeline(
+        &mut self,
+        shaders: Shaders,
+        style: DrawStyle,
+    ) -> Result<PipelineId, GpuError> {
+        // Checked here, so a missing feature is a clear error, not a validation
+        // message (Q-18.4) — or, without validation, undefined behaviour.
+        if !self.supports(style) {
+            return Err(GpuError::Unsupported(
+                "fillModeNonSolid (wireframe drawing) on this GPU",
+            ));
+        }
         let pipeline = Pipeline::new(
             &self.device,
             self.inputs.pipeline_layout,
-            self.swapchain.format.format,
-            self.depth.format,
+            (self.swapchain.format.format, self.depth.format),
             shaders,
+            style,
         )?;
         self.pipelines.push(pipeline);
         Ok(PipelineId(self.pipelines.len() - 1))
@@ -530,6 +555,10 @@ impl GpuContext {
             depth_format: format!("{:?}", self.depth.format),
             extent: (self.swapchain.extent.width, self.swapchain.extent.height),
             image_count: self.swapchain.images.len(),
+            point_size_range: (
+                props.limits.point_size_range[0],
+                props.limits.point_size_range[1],
+            ),
         }
     }
 
@@ -784,11 +813,13 @@ fn has_device_extension(
     Ok(exts.iter().any(|e| e.extension_name_as_c_str() == Ok(name)))
 }
 
+/// Creates the logical device. Also returns whether `fillModeNonSolid` (wireframe,
+/// § 18) was enabled: it's optional, so a GPU without it still gets a device.
 fn create_device(
     instance: &Instance,
     physical_device: vk::PhysicalDevice,
     queue_family_index: u32,
-) -> Result<Device, GpuError> {
+) -> Result<(Device, bool), GpuError> {
     // Swapchain and dynamic rendering: checked by `pick_physical_device`.
     // Portability subset: MoltenVK lists it and requires it to be enabled if listed.
     let mut extensions = vec![
@@ -806,11 +837,21 @@ fn create_device(
     // Enabling the extension adds its functions; the feature switch must also be on.
     let mut dynamic_rendering =
         vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+
+    // § 18: supported (this query) isn't enabled — the feature must also be *asked
+    // for* here, or a LINE pipeline is a validation error (Q-18.4).
+    // SAFETY: plain query on a live instance.
+    let supported = unsafe { instance.get_physical_device_features(physical_device) };
+    let wireframe = supported.fill_mode_non_solid == vk::TRUE;
+    let enabled = vk::PhysicalDeviceFeatures::default().fill_mode_non_solid(wireframe);
+
     let create_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(std::slice::from_ref(&queue_info))
         .enabled_extension_names(&extensions)
+        .enabled_features(&enabled)
         .push_next(&mut dynamic_rendering);
 
     // SAFETY: every pointer in `create_info` points to data alive until this call returns.
-    Ok(unsafe { instance.create_device(physical_device, &create_info, None)? })
+    let device = unsafe { instance.create_device(physical_device, &create_info, None)? };
+    Ok((device, wireframe))
 }

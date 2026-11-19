@@ -1,7 +1,8 @@
 # scop — one-line setup: `make` checks/installs dependencies, then builds (§ 16).
 #
 #   make              deps + release build
-#   make run          run with OBJ (default: the 42 logo) and optional TEXTURE (a .tga picture)
+#   make run          run with OBJ (default: the 42 logo) and optional TEXTURE (.tga pictures,
+#                     space-separated in quotes: one per object, in turn — § 18)
 #                     e.g. make run OBJ=resources/teapot.obj TEXTURE=resources/other.tga
 #                     (not TEX: that's one of make's own built-in variables, set to "tex")
 #   make deps         check for (and where possible install) Rust, glslc, Vulkan

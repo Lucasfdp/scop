@@ -41,7 +41,8 @@ home folder if you want it.
 make run                              # the 42 logo
 make run OBJ=resources/teapot.obj     # any .obj file
 make run TEXTURE=path/to/picture.tga  # a different picture, no rebuild needed
-./target/release/scop path/to/model.obj [path/to/picture.tga]
+make run OBJ=resources/test/concave.obj TEXTURE="a.tga b.tga"  # one picture per object
+./target/release/scop path/to/model.obj [picture.tga ...]
 ```
 
 ### Controls
@@ -54,8 +55,11 @@ make run TEXTURE=path/to/picture.tga  # a different picture, no rebuild needed
 | J / L | turn around y (spin) |
 | U / O | turn around z (roll) |
 | T | fade between the grey faces and the picture |
+| N | rotate which object gets which picture |
+| V | solid → wireframe → points |
+| mouse wheel, Z / X | zoom in / out (narrows the field of view; the camera stays put) |
 | Space | pause / resume the automatic spin |
-| R | reset position and rotation |
+| R | reset position, rotation and zoom |
 | Esc | quit |
 
 Movement follows the screen's axes whatever way the model is turned; every rotation is
@@ -70,8 +74,9 @@ make clean / make fclean / make re
 ```
 
 The default picture is `resources/texture.tga`, embedded in the binary so scop runs from
-any directory; replace it and rebuild to change the default. To try another picture
-without rebuilding, pass it as the second argument. Pictures must be 24- or 32-bit TGA
+any directory; replace it and rebuild to change the default. To try other pictures
+without rebuilding, pass them after the model: each object in the file (`o` / `g` lines)
+takes the next picture in turn. Pictures must be 24- or 32-bit TGA
 (uncompressed or run-length encoded); on macOS:
 `sips -Z 1024 -s format tga picture.jpg --out picture.tga`.
 
@@ -86,9 +91,12 @@ without rebuilding, pass it as the second argument. Pictures must be 24- or 32-b
 - One flat grey per `.obj` face (each triangle gets its own corners).
 - Perspective camera that frames any model from its bounding box; the model turns around
   the bounding box's centre.
-- Own TGA loader (uncompressed and run-length encoded, 24/32-bit); planar texture
-  mapping; sRGB-correct colours; the grey ↔ picture fade eased with smoothstep and
+- Own TGA loader (uncompressed and run-length encoded, 24/32-bit); sRGB-correct colours;
+  box texture mapping (bonus): each face takes the front, side or top projection it faces
+  most, with one scale across and down, so no face is streaked or stretched;
+  a picture per object (`o` / `g` lines), rotated with N; the grey ↔ picture fade eased with smoothstep and
   reversible at any moment.
+- Solid, wireframe and point views; zoom by field of view.
 - Depth buffer, window resizing, validation-layer-clean in debug builds.
 - Every real decision — what was chosen, what was rejected and why — is in
   [`DECISIONS.md`](DECISIONS.md).
@@ -125,7 +133,8 @@ recorded in [`DECISIONS.md`](DECISIONS.md) (2026-11-03).
   almost all of `engine/` and `scop/` — Vulkan setup, swapchain, frame loop and
   synchronisation, pipeline and shader loading, buffers, the maths library,
   uniforms and descriptors, depth buffer, the `.obj` parser, greys and controls, the TGA
-  loader and textures, the fade, window resizing — plus the unit tests, the `Makefile`
+  loader and textures, the fade, window resizing, the bonus (ear clipping, box mapping,
+  a picture per object, view modes, zoom) — plus the unit tests, the `Makefile`
   and `scripts/deps.sh`.
 - **Mine.** The choices (Rust + Vulkan, the engine/app split, and each decision in
   `DECISIONS.md`, picked from the trade-offs Claude laid out), running and checking every

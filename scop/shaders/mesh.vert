@@ -27,4 +27,7 @@ void main() {
     gl_Position = camera.view_proj * push.model * vec4(in_position, 1.0);
     colour = in_colour;
     uv = in_uv;
+    // § 18: dot size in pixels when drawn as points (ignored for triangles). The GPU
+    // clamps it to its range (GpuInfo::point_size_range).
+    gl_PointSize = 4.0;
 }

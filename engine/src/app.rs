@@ -6,7 +6,7 @@ use crate::gpu::GpuContext;
 use crate::input::Input;
 use crate::maths::Mat4;
 use crate::mesh::MeshData;
-use crate::pipeline::Shaders;
+use crate::pipeline::{DrawStyle, Shaders};
 use crate::platform::RunError;
 use crate::tga::Image;
 
@@ -53,9 +53,24 @@ pub struct Gfx<'a> {
 }
 
 impl Gfx<'_> {
-    /// Builds a pipeline from the app's compiled shaders.
+    /// Builds a pipeline from the app's compiled shaders, drawing solid triangles.
     pub fn create_pipeline(&mut self, shaders: Shaders) -> Result<PipelineId, RunError> {
-        Ok(self.gpu.create_pipeline(shaders)?)
+        self.create_styled_pipeline(shaders, DrawStyle::Fill)
+    }
+
+    /// Builds a pipeline drawing in `style` (§ 18). Fails for a style this GPU
+    /// can't do: check `supports` first.
+    pub fn create_styled_pipeline(
+        &mut self,
+        shaders: Shaders,
+        style: DrawStyle,
+    ) -> Result<PipelineId, RunError> {
+        Ok(self.gpu.create_pipeline(shaders, style)?)
+    }
+
+    /// Whether this GPU can draw in `style` (§ 18: wireframe is optional).
+    pub fn supports(&self, style: DrawStyle) -> bool {
+        self.gpu.supports(style)
     }
 
     /// Uploads a mesh to GPU memory (through a staging buffer, § 7).
@@ -88,6 +103,9 @@ pub struct GpuInfo {
     /// Swapchain size in physical pixels.
     pub extent: (u32, u32),
     pub image_count: usize,
+    /// Smallest and largest dot size for `DrawStyle::Points`, in pixels (§ 18).
+    /// `(1.0, 1.0)` means the GPU only draws 1-pixel dots.
+    pub point_size_range: (f32, f32),
 }
 
 /// One requested draw, as the app described it (tickets + plain numbers).

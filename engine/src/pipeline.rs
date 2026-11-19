@@ -21,6 +21,21 @@ pub struct Shaders {
     pub fragment: &'static [u8],
 }
 
+/// How a pipeline draws each triangle (§ 18). The same mesh can be drawn in any
+/// style: only the pipeline changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawStyle {
+    /// Solid triangles (polygon mode `FILL`) — what every pipeline did before § 18.
+    Fill,
+    /// Only the triangles' edges (polygon mode `LINE`). Needs the device feature
+    /// `fillModeNonSolid`, enabled when the device is created; see `Gfx::supports`.
+    Wireframe,
+    /// Only the corners, as dots (topology `POINT_LIST`). Not polygon mode `POINT`:
+    /// Metal can't do that one (portability subset `pointPolygons`). The vertex
+    /// shader must write `gl_PointSize`.
+    Points,
+}
+
 /// A pipeline. Its layout is the engine-wide one from `ShaderInputs` (§ 10),
 /// shared and destroyed there, not owned here.
 pub(crate) struct Pipeline {
@@ -28,14 +43,14 @@ pub(crate) struct Pipeline {
 }
 
 impl Pipeline {
-    /// Builds a pipeline that draws triangles into images of `colour_format`, with a
+    /// Builds a pipeline that draws in `style` into images of `colour_format`, with a
     /// depth image of `depth_format`, reading the extra inputs described by `layout`.
     pub(crate) fn new(
         device: &Device,
         layout: vk::PipelineLayout,
-        colour_format: vk::Format,
-        depth_format: vk::Format,
+        (colour_format, depth_format): (vk::Format, vk::Format),
         shaders: Shaders,
+        style: DrawStyle,
     ) -> Result<Self, GpuError> {
         let vertex_words = spirv::words_from_bytes(shaders.vertex)?;
         let fragment_words = spirv::words_from_bytes(shaders.fragment)?;
@@ -56,7 +71,7 @@ impl Pipeline {
             let (vertex, fragment) = modules?;
 
             let formats = (colour_format, depth_format);
-            let result = create_pipeline(device, layout, formats, vertex, fragment);
+            let result = create_pipeline(device, layout, formats, (vertex, fragment), style);
 
             // The pipeline keeps its own compiled copy; the modules can go now.
             device.destroy_shader_module(vertex, None);
@@ -85,9 +100,17 @@ fn create_pipeline(
     device: &Device,
     layout: vk::PipelineLayout,
     (colour_format, depth_format): (vk::Format, vk::Format),
-    vertex: vk::ShaderModule,
-    fragment: vk::ShaderModule,
+    (vertex, fragment): (vk::ShaderModule, vk::ShaderModule),
+    style: DrawStyle,
 ) -> Result<vk::Pipeline, GpuError> {
+    // § 18: the only two settings that differ between the styles.
+    let (topology, polygon_mode) = match style {
+        DrawStyle::Fill => (vk::PrimitiveTopology::TRIANGLE_LIST, vk::PolygonMode::FILL),
+        DrawStyle::Wireframe => (vk::PrimitiveTopology::TRIANGLE_LIST, vk::PolygonMode::LINE),
+        // Every index is its own dot; the polygon mode is irrelevant for points.
+        DrawStyle::Points => (vk::PrimitiveTopology::POINT_LIST, vk::PolygonMode::FILL),
+    };
+
     let stages = [
         vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::VERTEX)
@@ -106,8 +129,7 @@ fn create_pipeline(
         .vertex_binding_descriptions(&bindings)
         .vertex_attribute_descriptions(&attributes);
 
-    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default().topology(topology);
 
     // One viewport and one scissor; their values are dynamic (set while recording).
     let viewport = vk::PipelineViewportStateCreateInfo::default()
@@ -115,7 +137,8 @@ fn create_pipeline(
         .scissor_count(1);
 
     let rasterisation = vk::PipelineRasterizationStateCreateInfo::default()
-        .polygon_mode(vk::PolygonMode::FILL)
+        .polygon_mode(polygon_mode)
+        // No culling: back faces stay, so wireframe shows the far edges too (X-ray).
         .cull_mode(vk::CullModeFlags::NONE)
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
         .line_width(1.0);

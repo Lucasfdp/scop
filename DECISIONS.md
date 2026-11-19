@@ -259,6 +259,13 @@ portability subset `pointPolygons`); an edge index buffer for wireframe (more co
 section (§ 17 normals, § 14 sets, § 6 pipelines, § 9 field of view).
 **Cost accepted:** texture seams where faces meet at an angle; three pipelines per shader pair.
 **Revisit if:** seams look bad on organic models (go triplanar).
+**Update (same day, checkpoint):** the picture-aspect correction moved from the mesh UVs
+to the fragment shader (`textureSize`, shorter side = unit): N hands an object a different
+picture, so the correction must follow the picture, not be baked into the mesh. The
+engine checks the style before building a pipeline (`Gfx::supports`, clear error instead
+of a validation message). The camera's distance stays computed from the starting 60°, or
+zooming would be cancelled out by the camera backing off. All objects share one placement,
+so they keep their positions relative to each other.
 
 ## 2026-11-18 — Bonus extras split into §§ 19–23
 

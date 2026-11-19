@@ -27,7 +27,7 @@ pub use input::{Input, Key};
 pub use maths::{Mat4, Vec3, Vec4};
 pub use mesh::{MeshData, Vertex};
 pub use obj::{ObjError, ObjErrorKind, ObjModel, parse_obj};
-pub use pipeline::Shaders;
+pub use pipeline::{DrawStyle, Shaders};
 pub use platform::{RunError, WindowConfig, run};
 pub use tga::{Image, TgaError, load_tga};
 

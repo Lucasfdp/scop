@@ -2,7 +2,7 @@
 section: 18
 slug: bonus-texture-mapping
 tier: T1
-status: in-progress
+status: done
 prereqs: [17]
 terms: [box mapping, texel density, texture seam, triplanar mapping, object line, per-object bounding box, one draw per object, polygon mode, fillModeNonSolid, portability subset, point list, gl_PointSize, zoom vs dolly, scroll delta]
 ---
