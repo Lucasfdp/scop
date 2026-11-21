@@ -1555,3 +1555,39 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### draw-call overhead
 **Plain:** the per-draw cost (CPU recording, GPU start-up), paid again for every draw however small.
 **Introduced in:** § 22
+
+### cube map
+**Plain:** six square pictures (inside faces of a box) stored as one texture, looked up with a direction.
+**Introduced in:** § 23
+
+### cube face
+**Plain:** one of a cube map's six pictures: +x, −x, +y, −y, +z, −z (Vulkan's layer order).
+**Introduced in:** § 23
+
+### direction lookup
+**Plain:** sampling a cube map with a direction (`samplerCube`); the GPU picks the face and spot.
+**Introduced in:** § 23
+
+### skybox
+**Plain:** a big box around the camera, moving with it, coloured from the cube map.
+**Introduced in:** § 23
+
+### depth writing off
+**Plain:** test against the depth image but don't write into it; the sky paints the background without blocking.
+**Introduced in:** § 23
+
+### environment map
+**Plain:** a cube map for what surrounds the scene (sky, reflections); scop's is in set 0.
+**Introduced in:** § 23
+
+### reflection
+**Plain:** the view direction bounced off a surface (`reflect`): where a mirror looks.
+**Introduced in:** § 23
+
+### chrome
+**Plain:** colour mode 4: every pixel shows the sky in its reflection direction.
+**Introduced in:** § 23
+
+### generated sky
+**Plain:** scop's built-in cube map, computed at start: gradient, horizon, ground, sun where the light is.
+**Introduced in:** § 23

@@ -656,3 +656,29 @@ to see the cost, compare frame times without the cap, or watch for the number dr
 **A-22.5** The vertex shader turns each normal by the **whole** model for that copy — sticky note ×
 the copy's own matrix — the same combined card that places its corners. So each copy's normals turn
 with it, and the unchanged light code (§ 20) sees the right direction for every face of every copy.
+
+## Section 23
+
+**A-23.1** Six square pictures — the inside faces of a box — stored as one texture. It's looked up with a
+**direction** because it describes what's *around* a point, not across a flat surface: the direction
+says "what's over there?", and the GPU picks the face it points at and the spot on it. Every direction
+has an answer, so it covers the whole surroundings.
+
+**A-23.2** It would behave like a room, not a sky: as the camera moves on its orbit it gets nearer one
+wall and further from another, walls slide past at different speeds, and you could see the box's
+**edges and corners**. Moving with the camera, only turning changes the view — like something infinitely
+far away.
+
+**A-23.3** **Only the sky.** Drawn first with depth writing on, the box writes its (very near) depth over
+the whole screen; the model is further away, so it fails the depth test (§ 11) everywhere and is never
+drawn. With depth writing off, the box paints the background but leaves the depth image at "nothing
+here", so the model passes the test and draws over it — whatever the box's size.
+
+**A-23.4** Each face is **flat** with one normal (flat shading, § 20), so each acts as its own flat mirror.
+Neighbouring faces point different ways, so at their shared edge the bounce direction jumps — the
+reflection breaks sharply. The teapot's hundreds of small flat faces become hundreds of little mirrors:
+a disco ball. Smooth (averaged) normals would give a smooth chrome.
+
+**A-23.5** So everything tells the same story: the model's bright side (§ 20 light) faces the sun you see
+in the sky and in its reflections. With the sun elsewhere, the model would be lit from one side while
+the sky's sun sits on another — it looks fake immediately, even if you can't say why.
