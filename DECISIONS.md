@@ -323,3 +323,23 @@ new ids per reload (the app would have to update its tickets for no benefit).
 textures) still needs a restart; the committed `.spv` isn't refreshed by reloads (`make spv`).
 **Revisit if:** more shaders than two (watch a whole folder), or reloads should keep frames
 flowing (a deletion queue, as noted in § 19).
+
+## 2026-11-20 — § 22: instancing
+**Chose:** a per-frame-slot storage buffer of matrices at set 0 binding 1 (capacity 4096),
+read in the vertex shader with `gl_InstanceIndex`; position 0 is always the identity, so every
+ordinary draw is "1 copy at 0" and one shader / one pipeline per style serves both.
+`Frame::draw_instances` packs copies after the identity, draws what fits and warns once.
+scop: G toggles an 8 × 8 × 8 crowd built on the CPU each frame from § 9's cards, shrunk to fit
+inside the model's sphere (camera, zoom and depth range unchanged); copies never overlap.
+**Rejected:** a second vertex binding with `INSTANCE` input rate (changes the vertex layout and
+the shader contract for every pipeline); separate instanced pipelines; one shared list (§ 10's
+race); growing the buffer on demand (ft_vox); spinning in the shader (keeps the shader general).
+**Why:** § 22 lowered to T1, minimal maths (owner); every earlier feature works on the crowd
+unchanged, including the light (normals turned by `push.model × instance`).
+**Cost accepted:** 256 KB of instance list per frame slot; the CPU rebuilds 512 matrices per frame.
+**Revisit if:** many more copies or per-copy colours/pictures (add fields to the list), or the
+copies' motion moves to the GPU.
+**Update 2026-11-21 (owner's question in the walkthrough):** `draw_instances` returns an
+`InstanceRange`; `draw_instances_again` draws another mesh with the same seats. scop's crowd
+stores its 512 matrices once and every further object reuses them — a 10-object model uses
+512 seats instead of 5,120 (which overflowed the 4,095 free seats and dropped objects 9–10).

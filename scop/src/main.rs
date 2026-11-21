@@ -50,6 +50,11 @@ const PITCH_LIMIT: f32 = 89.0 * std::f32::consts::PI / 180.0;
 /// Fixed in the world: orbiting doesn't move it (Q-20.1).
 const LIGHT_DIRECTION: Vec3 = Vec3::new(1.0, -1.0, -1.0);
 
+/// The crowd (§ 22): copies per side of the grid — 8 × 8 × 8 = 512 copies.
+const CROWD_SIDE: usize = 8;
+/// Each copy's size as a share of its grid cell (1.0 = neighbours would touch).
+const CROWD_COPY_SIZE: f32 = 0.8;
+
 /// How often the FPS in the title is updated, in seconds (§ 19, Q-19.2).
 const FPS_WINDOW: f32 = 0.5;
 /// What C cycles through (§ 19). The index is what the fragment shader gets.
@@ -77,6 +82,7 @@ controls:
   wheel, Z/X  zoom in / out (field of view)
   mouse drag  orbit the camera round the model
   B           light on / off
+  G           one model ↔ a crowd of 512 (instancing)
   Space       pause / resume the automatic spin
   R           reset (placement and zoom)
   Esc         quit
@@ -232,6 +238,43 @@ struct Scop {
     light_on: bool,
     /// § 21: watching the shader sources; `None` = hot reload off.
     shader_watch: Option<hot_reload::ShaderWatch>,
+    /// § 22: G — draw a crowd of copies instead of the model.
+    crowd: bool,
+    /// Seconds the crowd has been spinning (each copy's turn is worked out from it).
+    crowd_time: f32,
+}
+
+/// The crowd's copies (§ 22): a `CROWD_SIDE`³ grid, each copy shrunk and turning its
+/// own way, all fitting inside the model's sphere (`centre`, `radius`) — so the camera,
+/// zoom and depth range need no change. Built from the cards you know (§ 9), right to
+/// left: move the model's centre to the origin, shrink, tilt, spin, move to its cell.
+fn crowd_copies(centre: Vec3, radius: f32, time: f32) -> Vec<Mat4> {
+    let side = CROWD_SIDE as f32;
+    // Cell size: chosen so the whole grid, corners included, fits in the sphere.
+    let cell = 2.0 * radius / (3f32.sqrt() * side);
+    let size = CROWD_COPY_SIZE / (3f32.sqrt() * side); // each copy's size vs the model
+    let middle = (side - 1.0) / 2.0;
+    let mut copies = Vec::with_capacity(CROWD_SIDE.pow(3));
+    for x in 0..CROWD_SIDE {
+        for y in 0..CROWD_SIDE {
+            for z in 0..CROWD_SIDE {
+                let i = copies.len();
+                let place = Vec3::new(x as f32 - middle, y as f32 - middle, z as f32 - middle);
+                // Variety from the copy's number: its own speed, start angle and tilt.
+                let speed = 0.4 + (i % 7) as f32 * 0.2;
+                let spin = time * speed + i as f32;
+                let tilt = (i % 5) as f32 * 0.3;
+                copies.push(
+                    Mat4::translation(centre + place * cell)
+                        * Mat4::rotation_y(spin)
+                        * Mat4::rotation_x(tilt)
+                        * Mat4::scale(Vec3::new(size, size, size))
+                        * Mat4::translation(-centre),
+                );
+            }
+        }
+    }
+    copies
 }
 
 /// A model read from a file and turned into meshes, but not uploaded yet (§ 19).
@@ -418,6 +461,13 @@ impl App for Scop {
         if input.pressed(Key::B) {
             self.light_on = !self.light_on;
         }
+        // § 22: G switches to the crowd; the copies keep turning either way.
+        if input.pressed(Key::G) {
+            self.crowd = !self.crowd;
+            let copies = if self.crowd { CROWD_SIDE.pow(3) } else { 1 };
+            println!("copies: {copies}");
+        }
+        self.crowd_time += dt;
         let p = &mut self.placement;
 
         // Toggles: `pressed`, so one press = one switch (Q-13.3).
@@ -504,10 +554,29 @@ impl App for Scop {
             nearest,
             farthest,
         ];
-        // One draw per object, each with its own picture (§ 18, Q-18.3).
+        // § 22: the crowd's copies, the same for every object of the model.
+        let copies = if self.crowd {
+            crowd_copies(self.model.centre, self.model.radius, self.crowd_time)
+        } else {
+            Vec::new()
+        };
+        // One draw per object, each with its own picture (§ 18, Q-18.3) — with the
+        // crowd on, still one draw per object: one instanced draw of 512 copies. The
+        // first object stores the copies; the others reuse its seats (shared range),
+        // so a 10-object model still uses 512 seats, not 5,120.
+        let mut shared: Option<engine::InstanceRange> = None;
         for (i, &mesh) in self.meshes.iter().enumerate() {
-            if let Some(texture) = picture_for(i, self.picture_shift, &self.textures) {
-                frame.draw_with(pipeline, mesh, texture, model, params);
+            let Some(texture) = picture_for(i, self.picture_shift, &self.textures) else {
+                continue;
+            };
+            match (self.crowd, shared) {
+                (false, _) => frame.draw_with(pipeline, mesh, texture, model, params),
+                (true, Some(range)) => {
+                    frame.draw_instances_again(pipeline, mesh, texture, model, params, range)
+                }
+                (true, None) => {
+                    shared = frame.draw_instances(pipeline, mesh, texture, model, params, &copies)
+                }
             }
         }
     }
@@ -607,6 +676,8 @@ fn main() -> ExitCode {
         orbit: Orbit::START,
         light_on: false,
         shader_watch,
+        crowd: false,
+        crowd_time: 0.0,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -985,6 +1056,48 @@ mod tests {
                 assert!(n.dot(outwards) > 0.0, "inward normal {n:?}");
             }
         }
+    }
+
+    #[test]
+    fn the_crowd_fits_the_model_without_overlapping() {
+        let (centre, radius) = (Vec3::new(3.0, 1.0, -2.0), 2.0);
+        let copies = crowd_copies(centre, radius, 1.5);
+        assert_eq!(copies.len(), 512);
+        let copy_radius = radius * CROWD_COPY_SIZE / (3f32.sqrt() * CROWD_SIDE as f32);
+        // Where each copy's own centre ends up.
+        let middles: Vec<Vec3> = copies
+            .iter()
+            .map(|m| (*m * engine::Vec4::point(centre)).xyz())
+            .collect();
+        for &p in &middles {
+            // Inside the model's sphere, so camera, zoom and depth range still fit.
+            assert!((p - centre).length() + copy_radius <= radius * 1.0001);
+        }
+        for (i, &a) in middles.iter().enumerate() {
+            for &b in &middles[i + 1..] {
+                assert!((a - b).length() >= 2.0 * copy_radius, "copies overlap");
+            }
+        }
+    }
+
+    #[test]
+    fn every_copy_turns_its_own_way() {
+        let copies = crowd_copies(Vec3::ZERO, 1.0, 0.7);
+        let cards: Vec<_> = copies.iter().map(|m| m.to_cols_array()).collect();
+        for (i, a) in cards.iter().enumerate() {
+            assert!(
+                cards[i + 1..].iter().all(|b| b != a),
+                "two identical copies"
+            );
+        }
+        // And they move: a moment later every card is different.
+        let later = crowd_copies(Vec3::ZERO, 1.0, 0.8);
+        assert!(
+            copies
+                .iter()
+                .zip(&later)
+                .all(|(a, b)| a.to_cols_array() != b.to_cols_array())
+        );
     }
 
     #[test]

@@ -138,6 +138,8 @@ pub(crate) struct Draw<'a> {
     pub(crate) texture_set: vk::DescriptorSet,
     /// The sticky note: model matrix + the app's four params (§ 15, § 19), as bytes.
     pub(crate) push: [u8; PUSH_SIZE],
+    /// § 22: (first instance, how many copies). Ordinary draws: (0, 1).
+    pub(crate) instances: (u32, u32),
 }
 
 /// Everything a frame's commands need besides the target image.
@@ -303,8 +305,11 @@ pub(crate) fn record_frame(
                 0,
                 vk::IndexType::UINT32,
             );
-            // All indices, 1 instance, from index 0, no vertex offset, instance 0.
-            device.cmd_draw_indexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
+            // All indices, from index 0, no vertex offset; § 22: `count` copies whose
+            // matrices start at `first` in the instance list (gl_InstanceIndex counts
+            // from there). Ordinary draws: 1 copy at position 0, the identity.
+            let (first, count) = draw.instances;
+            device.cmd_draw_indexed(command_buffer, mesh.index_count, count, 0, 0, first);
         }
         rendering.cmd_end_rendering(command_buffer);
         // The drawing must finish before the frame counts as done.

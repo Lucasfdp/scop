@@ -2,7 +2,7 @@
 section: 22
 slug: bonus-instancing
 tier: T1
-status: in-progress
+status: done
 prereqs: [10, 15, 19, 20]
 terms: [draw call, instancing, instance, instance index, first instance, instance buffer, storage buffer, draw-call overhead]
 ---

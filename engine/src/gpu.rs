@@ -20,7 +20,7 @@ use crate::depth::DepthImage;
 use crate::frames::{self, Draw, DrawList, FRAMES_IN_FLIGHT, FrameTarget, Frames};
 use crate::mesh::{Mesh, MeshData};
 use crate::pipeline::{DrawStyle, Pipeline, Shaders};
-use crate::shader_inputs::{ShaderInputs, push_bytes};
+use crate::shader_inputs::{INSTANCE_CAPACITY, ShaderInputs, push_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
 use crate::texture::Textures;
@@ -110,6 +110,8 @@ pub(crate) struct GpuContext {
     rendering_loader: khr::dynamic_rendering::Device,
     /// § 18: whether `fillModeNonSolid` was enabled at device creation (wireframe).
     wireframe: bool,
+    /// § 22: already said that copies didn't fit in the instance list (say it once).
+    warned_instances: bool,
     memory_types: vk::PhysicalDeviceMemoryProperties,
     frames: Frames,
     inputs: ShaderInputs,
@@ -308,6 +310,7 @@ impl GpuContext {
             swapchain,
             rendering_loader,
             wireframe,
+            warned_instances: false,
             memory_types,
             frames,
             inputs,
@@ -485,6 +488,13 @@ impl GpuContext {
     /// wait fence → write camera → acquire → reset fence → record → submit → present.
     pub(crate) fn draw_frame(&mut self, frame: &Frame) -> Result<FrameStatus, GpuError> {
         let slot_index = self.frames.index();
+        if frame.instances_dropped && !self.warned_instances {
+            eprintln!(
+                "engine: more copies than the instance list holds ({}): drawing the ones that fit",
+                INSTANCE_CAPACITY - 1
+            );
+            self.warned_instances = true;
+        }
 
         // Turn tickets into the real objects before touching the GPU, so a bad
         // ticket fails cleanly instead of half-way through a frame.
@@ -505,6 +515,7 @@ impl GpuContext {
                     mesh: m,
                     texture_set: t,
                     push: push_bytes(call.model, call.params),
+                    instances: call.instances,
                 }),
                 _ => return Err(GpuError::UnknownHandle),
             }
@@ -522,6 +533,8 @@ impl GpuContext {
             //     last frame that read it (Q-10.2). Write this frame's camera.
             self.inputs
                 .write_camera(slot_index, frame.camera, frame.light);
+            // § 22: and this frame's instance list (position 0 stays the identity).
+            self.inputs.write_instances(slot_index, &frame.instances);
 
             // 2. Which image do we draw into? `image_free` is raised once it's off screen.
             let acquired = self.swapchain_loader.acquire_next_image(

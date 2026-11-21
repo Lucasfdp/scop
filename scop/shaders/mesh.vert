@@ -5,6 +5,12 @@
 // § 10: two more inputs, declared by the engine's shared pipeline layout.
 
 // Noticeboard: set 0, binding 0 — this frame slot's camera buffer.
+// § 22: this frame's instance list — one matrix per copy. Position 0 is always the
+// identity: ordinary draws (1 copy, first instance 0) read it and change nothing.
+layout(set = 0, binding = 1) readonly buffer Instances {
+    mat4 instance[];
+} instances;
+
 layout(set = 0, binding = 0) uniform Camera {
     mat4 view_proj;   // projection × view, once per frame
     vec4 light;       // § 20: used by mesh.frag (same block there)
@@ -27,16 +33,21 @@ layout(location = 2) out float distance;  // § 19: how far from the camera (dep
 layout(location = 3) out vec3 normal;     // § 20: the normal, turned with the model
 
 void main() {
+    // § 22: this copy's own card first, then the sticky note (the whole crowd's place).
+    // gl_InstanceIndex = which copy, counted from the draw's first instance.
+    mat4 model = push.model * instances.instance[gl_InstanceIndex];
     // Right to left (§ 9): place the corner (w = 1: a point), then camera, then projection.
-    gl_Position = camera.view_proj * push.model * vec4(in_position, 1.0);
+    gl_Position = camera.view_proj * model * vec4(in_position, 1.0);
     colour = in_colour;
     uv = in_uv;
     // § 19: the perspective card's last row copied the distance into w (§ 9), so w
     // *is* the linear depth. (gl_FragCoord.z, the stored depth, isn't linear: Q-19.5.)
     distance = gl_Position.w;
     // § 20: normals turn with the model — the model card's turn, without its move
-    // (mat3 keeps only the turn part). Enough because scop never stretches models.
-    normal = mat3(push.model) * in_normal;
+    // (mat3 keeps only the turn part). § 22: the *whole* model, copy included, so each
+    // copy's normals turn with it (Q-22.5). Copies are shrunk evenly, never stretched,
+    // so this is still enough; mesh.frag makes the length 1 again.
+    normal = mat3(model) * in_normal;
     // § 18: dot size in pixels when drawn as points (ignored for triangles). The GPU
     // clamps it to its range (GpuInfo::point_size_range).
     gl_PointSize = 4.0;

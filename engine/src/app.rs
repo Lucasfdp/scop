@@ -8,6 +8,7 @@ use crate::maths::{Mat4, Vec3};
 use crate::mesh::MeshData;
 use crate::pipeline::{DrawStyle, Shaders};
 use crate::platform::RunError;
+use crate::shader_inputs::INSTANCE_CAPACITY;
 use crate::tga::Image;
 
 /// What an app implements. The engine owns the loop and calls these
@@ -140,6 +141,17 @@ pub(crate) struct DrawCall {
     /// Four numbers for the shaders, meaning set by the app (§ 19). With
     /// `draw_textured`: `[blend, 0, 0, 0]` (§ 15).
     pub(crate) params: [f32; 4],
+    /// § 22: (first instance, how many). Ordinary draws: (0, 1) — position 0, the
+    /// identity. Instanced draws: their place in the frame's instance list.
+    pub(crate) instances: (u32, u32),
+}
+
+/// Where one `draw_instances` put its copies in this frame's instance list (§ 22):
+/// the first seat and how many. Only meaningful within the frame it came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstanceRange {
+    first: u32,
+    count: u32,
 }
 
 /// The draw list for one frame: what the app asks the engine to draw.
@@ -152,6 +164,11 @@ pub struct Frame {
     pub(crate) title: Option<String>,
     /// The light (§ 20): direction it shines in (xyz) and strength (w). Default: off.
     pub(crate) light: [f32; 4],
+    /// § 22: every instanced draw's matrices, one after another. They go into the
+    /// slot's instance list from position 1 (0 is the identity for ordinary draws).
+    pub(crate) instances: Vec<Mat4>,
+    /// Some copies didn't fit in the list and weren't drawn.
+    pub(crate) instances_dropped: bool,
 }
 
 impl Frame {
@@ -164,6 +181,8 @@ impl Frame {
             draws: Vec::new(),
             title: None,
             light: [0.0; 4],
+            instances: Vec::new(),
+            instances_dropped: false,
         }
     }
 
@@ -236,6 +255,72 @@ impl Frame {
             texture,
             model,
             params,
+            instances: (0, 1),
+        });
+    }
+
+    /// Instancing (§ 22): draws `mesh` once per matrix in `copies`, with **one** draw
+    /// call. Each copy is placed by `model × its own matrix` (the shader reads it with
+    /// `gl_InstanceIndex`); `params` and the picture are shared. If this frame's list
+    /// is full (`INSTANCE_CAPACITY`), only the copies that fit are drawn, and the
+    /// engine says so once.
+    ///
+    /// Returns where the copies went in the list (`None` if none fitted): pass it to
+    /// `draw_instances_again` to draw another mesh with the **same** copies without
+    /// storing their matrices twice.
+    pub fn draw_instances(
+        &mut self,
+        pipeline: PipelineId,
+        mesh: MeshId,
+        texture: TextureId,
+        model: Mat4,
+        params: [f32; 4],
+        copies: &[Mat4],
+    ) -> Option<InstanceRange> {
+        // Position 0 is the identity, so the list has `capacity − 1` places for copies.
+        let free = INSTANCE_CAPACITY - 1 - self.instances.len();
+        let count = copies.len().min(free);
+        if count < copies.len() {
+            self.instances_dropped = true;
+        }
+        if count == 0 {
+            return None;
+        }
+        let first = 1 + self.instances.len() as u32; // after the identity and earlier copies
+        self.instances.extend_from_slice(&copies[..count]);
+        let range = InstanceRange {
+            first,
+            count: count as u32,
+        };
+        self.draw_instances_again(pipeline, mesh, texture, model, params, range);
+        Some(range)
+    }
+
+    /// Draws `mesh` with copies already in this frame's list (§ 22, shared range): the
+    /// `range` an earlier `draw_instances` returned **this frame**. No matrices are
+    /// added, so the 2nd, 3rd… object of a crowd costs no seats. A range that isn't in
+    /// this frame's list (e.g. kept from an earlier frame) draws nothing.
+    pub fn draw_instances_again(
+        &mut self,
+        pipeline: PipelineId,
+        mesh: MeshId,
+        texture: TextureId,
+        model: Mat4,
+        params: [f32; 4],
+        range: InstanceRange,
+    ) {
+        // Seats 1..=len hold this frame's copies; anything else isn't ours to read.
+        let end = range.first as usize + range.count as usize;
+        if range.first == 0 || end > 1 + self.instances.len() {
+            return;
+        }
+        self.draws.push(DrawCall {
+            pipeline,
+            mesh,
+            texture,
+            model,
+            params,
+            instances: (range.first, range.count),
         });
     }
 }
@@ -268,8 +353,107 @@ mod tests {
             [7.0, 1.0, 2.0, 3.0],
         );
         assert_eq!(frame.draws[3].params, [7.0, 1.0, 2.0, 3.0]); // passed on untouched
+        assert_eq!(frame.draws[3].instances, (0, 1)); // ordinary draw: the identity
         assert_eq!(frame.title, None);
         frame.set_title("scop");
         assert_eq!(frame.title.as_deref(), Some("scop"));
+    }
+    #[test]
+    fn instanced_draws_pack_after_the_identity() {
+        let mut frame = Frame::new(1.0);
+        let copies = |n: usize| vec![Mat4::IDENTITY; n];
+        frame.draw(PipelineId(0), MeshId(0), Mat4::IDENTITY); // ordinary: position 0
+        frame.draw_instances(
+            PipelineId(0),
+            MeshId(0),
+            TextureId(0),
+            Mat4::IDENTITY,
+            [0.0; 4],
+            &copies(3),
+        );
+        frame.draw_instances(
+            PipelineId(0),
+            MeshId(1),
+            TextureId(0),
+            Mat4::IDENTITY,
+            [0.0; 4],
+            &copies(2),
+        );
+        let ranges: Vec<_> = frame.draws.iter().map(|d| d.instances).collect();
+        // Ordinary at 0; the first crowd at 1..4; the second straight after, at 4..6.
+        assert_eq!(ranges, vec![(0, 1), (1, 3), (4, 2)]);
+        assert_eq!(frame.instances.len(), 5);
+        assert!(!frame.instances_dropped);
+    }
+
+    #[test]
+    fn later_objects_share_the_first_objects_copies() {
+        let mut frame = Frame::new(1.0);
+        let crowd = vec![Mat4::IDENTITY; 512];
+        let range = frame
+            .draw_instances(
+                PipelineId(0),
+                MeshId(0),
+                TextureId(0),
+                Mat4::IDENTITY,
+                [0.0; 4],
+                &crowd,
+            )
+            .unwrap();
+        for mesh in 1..10 {
+            frame.draw_instances_again(
+                PipelineId(0),
+                MeshId(mesh),
+                TextureId(0),
+                Mat4::IDENTITY,
+                [0.0; 4],
+                range,
+            );
+        }
+        // 10 objects, one set of 512 seats — not 5,120.
+        assert_eq!(frame.instances.len(), 512);
+        assert!(frame.draws.iter().all(|d| d.instances == (1, 512)));
+        assert!(!frame.instances_dropped);
+        // A range that isn't in this frame's list draws nothing.
+        let mut next_frame = Frame::new(1.0);
+        next_frame.draw_instances_again(
+            PipelineId(0),
+            MeshId(0),
+            TextureId(0),
+            Mat4::IDENTITY,
+            [0.0; 4],
+            range,
+        );
+        assert!(next_frame.draws.is_empty());
+    }
+
+    #[test]
+    fn too_many_copies_draw_what_fits() {
+        let mut frame = Frame::new(1.0);
+        let all = vec![Mat4::IDENTITY; INSTANCE_CAPACITY + 10];
+        frame.draw_instances(
+            PipelineId(0),
+            MeshId(0),
+            TextureId(0),
+            Mat4::IDENTITY,
+            [0.0; 4],
+            &all,
+        );
+        // Everything but position 0 (the identity) is used, and no further.
+        assert_eq!(
+            frame.draws[0].instances,
+            (1, (INSTANCE_CAPACITY - 1) as u32)
+        );
+        assert!(frame.instances_dropped);
+        // The list is full: a later instanced draw is skipped, not overrun.
+        frame.draw_instances(
+            PipelineId(0),
+            MeshId(0),
+            TextureId(0),
+            Mat4::IDENTITY,
+            [0.0; 4],
+            &all[..1],
+        );
+        assert_eq!(frame.draws.len(), 1);
     }
 }

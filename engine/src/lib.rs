@@ -23,7 +23,7 @@ mod tga;
 mod triangulate;
 
 // The whole public API.
-pub use app::{App, Flow, Frame, Gfx, GpuInfo, MeshId, PipelineId, TextureId};
+pub use app::{App, Flow, Frame, Gfx, GpuInfo, InstanceRange, MeshId, PipelineId, TextureId};
 pub use fps::{FpsCounter, FpsReading};
 pub use input::{Input, Key, MouseButton};
 pub use maths::{Mat4, Vec3, Vec4};

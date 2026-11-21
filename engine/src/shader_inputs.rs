@@ -7,6 +7,7 @@
 //! Shader side (must match):
 //! ```glsl
 //! layout(set = 0, binding = 0) uniform Camera { mat4 view_proj; vec4 light; } camera;
+//! layout(set = 0, binding = 1) readonly buffer Instances { mat4 instance[]; } instances;
 //! layout(push_constant) uniform Push { mat4 model; vec4 params; } push;
 //! ```
 
@@ -34,6 +35,11 @@ pub(crate) fn camera_bytes(view_proj: Mat4, light: [f32; 4]) -> [u8; CAMERA_SIZE
     }
     bytes
 }
+
+/// How many matrices one frame's instance list holds (§ 22). Position 0 is always the
+/// identity, so instanced draws get `INSTANCE_CAPACITY − 1` between them.
+pub(crate) const INSTANCE_CAPACITY: usize = 4096;
+const INSTANCE_BYTES: usize = INSTANCE_CAPACITY * MAT4_SIZE;
 
 /// The sticky note (§ 10, § 15, § 19): model matrix (bytes 0..64) + four numbers whose
 /// meaning the app decides (64..80). 80 ≤ 128, the size every GPU must allow.
@@ -70,6 +76,9 @@ pub(crate) fn mat4_bytes(m: Mat4) -> [u8; MAT4_SIZE] {
 struct CameraSlot {
     buffer: Buffer,
     mapped: *mut u8,
+    /// § 22: this slot's instance list (a storage buffer), persistently mapped.
+    instances: Buffer,
+    instances_mapped: *mut u8,
     set: vk::DescriptorSet,
 }
 
@@ -94,11 +103,19 @@ impl ShaderInputs {
     ) -> Result<Self, GpuError> {
         // The noticeboard's shape: binding 0 = one uniform buffer, read by the vertex
         // shader (camera) and, since § 20, the fragment shader (light).
-        let bindings = [vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(PUSH_STAGES)];
+        // § 22: binding 1 = this slot's instance list, read by the vertex shader.
+        let bindings = [
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(PUSH_STAGES),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX),
+        ];
         // Set 1 (§ 14): one picture + its sampler, read by the fragment shader.
         let texture_bindings = [vk::DescriptorSetLayoutBinding::default()
             .binding(0)
@@ -111,9 +128,14 @@ impl ShaderInputs {
             .offset(0)
             .size(PUSH_SIZE as u32)];
         // Room for one set per slot, each holding one uniform-buffer descriptor.
-        let pool_sizes = [vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(slot_count as u32)];
+        let pool_sizes = [
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(slot_count as u32),
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(slot_count as u32),
+        ];
 
         // SAFETY: plain creation on a live device. Until `inputs` exists, each failure
         // destroys by hand what was already made; after that, `destroy` does it.
@@ -199,6 +221,21 @@ impl ShaderInputs {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
+        // § 22: the instance list — also rewritten every frame, so also no staging.
+        let instances = match Buffer::new(
+            device,
+            memory_types,
+            INSTANCE_BYTES as vk::DeviceSize,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                // SAFETY: just created, never used by the GPU.
+                unsafe { buffer.destroy(device) };
+                return Err(e);
+            }
+        };
         let set_layouts = [self.set_layout];
         let alloc = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.pool)
@@ -207,15 +244,17 @@ impl ShaderInputs {
         // SAFETY: the memory is HOST_VISIBLE and mapped only here; the set comes from
         // our pool (freed with it); the buffer outlives the set (both go in `destroy`).
         unsafe {
-            let setup = || -> Result<(*mut u8, vk::DescriptorSet), GpuError> {
+            let setup = || -> Result<(*mut u8, *mut u8, vk::DescriptorSet), GpuError> {
                 let mapped = buffer.map(device)?;
+                let instances_mapped = instances.map(device)?;
                 let set = device.allocate_descriptor_sets(&alloc)?[0];
-                Ok((mapped, set))
+                Ok((mapped, instances_mapped, set))
             };
-            let (mapped, set) = match setup() {
+            let (mapped, instances_mapped, set) = match setup() {
                 Ok(s) => s,
                 Err(e) => {
                     buffer.destroy(device);
+                    instances.destroy(device);
                     return Err(e);
                 }
             };
@@ -231,13 +270,29 @@ impl ShaderInputs {
                 .dst_binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .buffer_info(&buffer_info);
-            device.update_descriptor_sets(&[write], &[]);
+            // § 22: binding 1 = the instance list, the whole buffer.
+            let instances_info = [vk::DescriptorBufferInfo::default()
+                .buffer(instances.handle)
+                .offset(0)
+                .range(INSTANCE_BYTES as vk::DeviceSize)];
+            let instances_write = vk::WriteDescriptorSet::default()
+                .dst_set(set)
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&instances_info);
+            device.update_descriptor_sets(&[write, instances_write], &[]);
 
             let camera = CameraSlot {
                 buffer,
                 mapped,
+                instances,
+                instances_mapped,
                 set,
             };
+            // Position 0: the identity, read by every ordinary draw — written once,
+            // never overwritten (instanced draws start at 1, Q-22.3).
+            let identity = mat4_bytes(Mat4::IDENTITY);
+            ptr::copy_nonoverlapping(identity.as_ptr(), camera.instances_mapped, MAT4_SIZE);
             // Valid even if the app never sets one: identity camera, light off.
             write_camera_bytes(camera.mapped, Mat4::IDENTITY, [0.0; 4]);
             Ok(camera)
@@ -254,6 +309,25 @@ impl ShaderInputs {
         unsafe { write_camera_bytes(self.cameras[slot].mapped, view_proj, light) };
     }
 
+    /// Writes this frame's instance matrices into slot `slot`'s list, from position 1
+    /// on (position 0 stays the identity). At most `INSTANCE_CAPACITY − 1`: `Frame`
+    /// already stops there.
+    ///
+    /// # Safety
+    /// As `write_camera`: the caller must have waited on that slot's fence.
+    pub(crate) unsafe fn write_instances(&self, slot: usize, matrices: &[Mat4]) {
+        let count = matrices.len().min(INSTANCE_CAPACITY - 1);
+        let base = self.cameras[slot].instances_mapped;
+        for (i, m) in matrices[..count].iter().enumerate() {
+            let bytes = mat4_bytes(*m);
+            // SAFETY: (1 + i) < INSTANCE_CAPACITY, so the 64 bytes are inside the mapped
+            // buffer; the caller guarantees the GPU isn't reading it.
+            unsafe {
+                ptr::copy_nonoverlapping(bytes.as_ptr(), base.add((1 + i) * MAT4_SIZE), MAT4_SIZE)
+            };
+        }
+    }
+
     /// The descriptor set pointing at slot `slot`'s camera buffer.
     pub(crate) fn camera_set(&self, slot: usize) -> vk::DescriptorSet {
         self.cameras[slot].set
@@ -268,6 +342,7 @@ impl ShaderInputs {
         unsafe {
             for camera in &self.cameras {
                 camera.buffer.destroy(device); // freeing the memory also unmaps it
+                camera.instances.destroy(device);
             }
             device.destroy_descriptor_pool(self.pool, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
