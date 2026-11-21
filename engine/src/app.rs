@@ -83,6 +83,29 @@ impl Gfx<'_> {
         Ok(self.gpu.replace_pipeline(pipeline, shaders, style)?)
     }
 
+    /// A background pipeline (§ 23): solid, depth test on but depth **writing off**.
+    /// Draw with it first (the sky): it paints the background and never blocks what
+    /// comes after.
+    pub fn create_background_pipeline(
+        &mut self,
+        shaders: Shaders<'_>,
+    ) -> Result<PipelineId, RunError> {
+        Ok(self.gpu.create_background_pipeline(shaders)?)
+    }
+
+    /// Uploads six square faces as one cube map (§ 23), in Vulkan's order: +x, −x,
+    /// +y, −y, +z, −z. All faces must be square and the same size.
+    pub fn create_cube_texture(&mut self, faces: [&Image; 6]) -> Result<TextureId, RunError> {
+        Ok(TextureId(self.gpu.create_cube_texture(faces)?))
+    }
+
+    /// Makes `cube` the environment (§ 23): the cube map every shader can read as
+    /// `environment` (set 0, binding 2). Fails if it isn't a cube map. Waits for the
+    /// GPU (a short pause). Default: a white cube.
+    pub fn set_environment(&mut self, cube: TextureId) -> Result<(), RunError> {
+        Ok(self.gpu.set_environment(cube.0)?)
+    }
+
     /// Whether this GPU can draw in `style` (§ 18: wireframe is optional).
     pub fn supports(&self, style: DrawStyle) -> bool {
         self.gpu.supports(style)
@@ -164,6 +187,8 @@ pub struct Frame {
     pub(crate) title: Option<String>,
     /// The light (§ 20): direction it shines in (xyz) and strength (w). Default: off.
     pub(crate) light: [f32; 4],
+    /// § 23: where the camera is (w = 1), for reflections. Default: the origin.
+    pub(crate) eye: [f32; 4],
     /// § 22: every instanced draw's matrices, one after another. They go into the
     /// slot's instance list from position 1 (0 is the identity for ordinary draws).
     pub(crate) instances: Vec<Mat4>,
@@ -181,6 +206,7 @@ impl Frame {
             draws: Vec::new(),
             title: None,
             light: [0.0; 4],
+            eye: [0.0, 0.0, 0.0, 1.0],
             instances: Vec::new(),
             instances_dropped: false,
         }
@@ -211,6 +237,12 @@ impl Frame {
     pub fn set_light(&mut self, direction: Vec3, strength: f32) {
         let d = direction.normalise();
         self.light = [d.x, d.y, d.z, strength.clamp(0.0, 1.0)];
+    }
+
+    /// Where the camera stands this frame (§ 23). Reaches the shaders as `camera.eye`:
+    /// what reflections are worked out from. Default: the origin.
+    pub fn set_camera_position(&mut self, eye: Vec3) {
+        self.eye = [eye.x, eye.y, eye.z, 1.0];
     }
 
     /// Background colour (linear RGBA, 0.0–1.0). Default: black.

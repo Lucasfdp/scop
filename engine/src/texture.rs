@@ -4,6 +4,10 @@
 //! staging buffer), a view, and its own descriptor set (set 1) pointing at view +
 //! the shared sampler. Texture 0 is always a 1×1 white picture, so every draw has
 //! *some* texture bound.
+//!
+//! § 23: a texture can also be a **cube map** — six square faces in one image (6
+//! layers, cube-compatible, viewed as CUBE), looked up with a direction. Texture 1 is
+//! always a 1×1 white cube: the environment until the app sets one.
 
 use ash::{Device, vk};
 
@@ -18,18 +22,39 @@ const MAX_TEXTURES: u32 = 64;
 /// the file, so the GPU decodes on read and the sRGB swapchain encodes on write (Q-14.5).
 const FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
 
-const COLOUR_RANGE: vk::ImageSubresourceRange = vk::ImageSubresourceRange {
-    aspect_mask: vk::ImageAspectFlags::COLOR,
-    base_mip_level: 0,
-    level_count: 1,
-    base_array_layer: 0,
-    layer_count: 1,
-};
+/// Every layer of the image (1 for a picture, 6 for a cube), mip level 0.
+fn colour_range(layers: u32) -> vk::ImageSubresourceRange {
+    vk::ImageSubresourceRange {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: layers,
+    }
+}
+
+/// Index of the always-present white cube (§ 23): the default environment.
+pub(crate) const WHITE_CUBE: usize = 1;
+
+/// Checks six cube faces (§ 23): all square, all the same size. Returns that size.
+pub(crate) fn check_cube_faces(faces: &[&Image; 6]) -> Result<u32, GpuError> {
+    let size = faces[0].width;
+    let ok = size > 0 && faces.iter().all(|f| f.width == size && f.height == size);
+    if ok {
+        Ok(size)
+    } else {
+        Err(GpuError::Unsupported(
+            "cube map faces must be square and all the same size",
+        ))
+    }
+}
 
 struct Texture {
     image: vk::Image,
     memory: vk::DeviceMemory,
     view: vk::ImageView,
+    /// § 23: a cube map (6 faces, sampled with a direction) rather than a picture.
+    cube: bool,
     /// Set 1 for draws using this texture. Written once, freed with the pool.
     set: vk::DescriptorSet,
 }
@@ -87,12 +112,42 @@ impl Textures {
             height: 1,
             rgba: vec![255; 4],
         };
-        if let Err(e) = textures.add(uploader, set_layout, &white) {
+        // Texture 0: white picture. Texture 1 (§ 23): white cube, the default environment.
+        let added = textures
+            .add(uploader, set_layout, &white)
+            .and_then(|_| textures.add_cube(uploader, set_layout, [&white; 6]));
+        if let Err(e) = added {
             // SAFETY: nothing submitted uses these yet (the upload waited or failed).
             unsafe { textures.destroy(device) };
             return Err(e);
         }
         Ok(textures)
+    }
+
+    /// § 23: uploads six faces as one cube map and returns its index. Face order is
+    /// Vulkan's: +x, −x, +y, −y, +z, −z.
+    pub(crate) fn add_cube(
+        &mut self,
+        uploader: &Uploader,
+        set_layout: vk::DescriptorSetLayout,
+        faces: [&Image; 6],
+    ) -> Result<usize, GpuError> {
+        check_cube_faces(&faces)?;
+        if self.textures.len() >= MAX_TEXTURES as usize {
+            return Err(GpuError::Unsupported("too many textures"));
+        }
+        let texture = upload(uploader, &faces, self.sampler, self.pool, set_layout)?;
+        self.textures.push(texture);
+        Ok(self.textures.len() - 1)
+    }
+
+    /// § 23: what the environment binding needs — the cube's view and the sampler.
+    /// `None` if `index` isn't a cube map.
+    pub(crate) fn cube(&self, index: usize) -> Option<(vk::ImageView, vk::Sampler)> {
+        self.textures
+            .get(index)
+            .filter(|t| t.cube)
+            .map(|t| (t.view, self.sampler))
     }
 
     /// Uploads `image` and returns its index (the number inside a `TextureId`).
@@ -105,7 +160,7 @@ impl Textures {
         if self.textures.len() >= MAX_TEXTURES as usize {
             return Err(GpuError::Unsupported("too many textures"));
         }
-        let texture = upload(uploader, image, self.sampler, self.pool, set_layout)?;
+        let texture = upload(uploader, &[image], self.sampler, self.pool, set_layout)?;
         self.textures.push(texture);
         Ok(self.textures.len() - 1)
     }
@@ -132,25 +187,35 @@ impl Textures {
 
 /// File → GPU: image + memory, staging copy with the two layout transitions, view,
 /// and a descriptor set written once to point at view + sampler.
+/// One layer = a picture; six layers (§ 23) = a cube map, faces in Vulkan's order.
 fn upload(
     uploader: &Uploader,
-    picture: &Image,
+    layers: &[&Image],
     sampler: vk::Sampler,
     pool: vk::DescriptorPool,
     set_layout: vk::DescriptorSetLayout,
 ) -> Result<Texture, GpuError> {
     let device = uploader.device;
+    let picture = layers[0]; // every layer has its size (checked for cubes)
+    let layer_count = layers.len() as u32;
+    let cube = layer_count == 6;
     let extent = vk::Extent3D {
         width: picture.width,
         height: picture.height,
         depth: 1,
     };
     let image_info = vk::ImageCreateInfo::default()
+        // § 23: a cube view needs the image made "cube compatible", with 6 layers.
+        .flags(if cube {
+            vk::ImageCreateFlags::CUBE_COMPATIBLE
+        } else {
+            vk::ImageCreateFlags::empty()
+        })
         .image_type(vk::ImageType::TYPE_2D)
         .format(FORMAT)
         .extent(extent)
         .mip_levels(1)
-        .array_layers(1)
+        .array_layers(layer_count)
         .samples(vk::SampleCountFlags::TYPE_1)
         .tiling(vk::ImageTiling::OPTIMAL)
         // Written by a copy, then read by shaders.
@@ -193,9 +258,12 @@ fn upload(
             .map_err(|e| fail(e.into()))?;
 
         // The loading dock, then the forklift with the two layout changes (§ 14 step 3).
-        let staging = uploader.staging_with(&picture.rgba).map_err(fail)?;
-        let copied = uploader
-            .run_once(|device, cmd| record_copy(device, cmd, staging.handle, image, extent));
+        // The layers one after another; the copy reads them in that order.
+        let bytes: Vec<u8> = layers.iter().flat_map(|l| l.rgba.iter().copied()).collect();
+        let staging = uploader.staging_with(&bytes).map_err(fail)?;
+        let copied = uploader.run_once(|device, cmd| {
+            record_copy(device, cmd, staging.handle, image, extent, layer_count)
+        });
         staging.destroy(device); // run_once waited: the copy is done (or never ran)
         copied.map_err(fail)?;
 
@@ -203,9 +271,13 @@ fn upload(
             .create_image_view(
                 &vk::ImageViewCreateInfo::default()
                     .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .view_type(if cube {
+                        vk::ImageViewType::CUBE
+                    } else {
+                        vk::ImageViewType::TYPE_2D
+                    })
                     .format(FORMAT)
-                    .subresource_range(COLOUR_RANGE),
+                    .subresource_range(colour_range(layer_count)),
                 None,
             )
             .map_err(|e| fail(e.into()))?;
@@ -239,6 +311,7 @@ fn upload(
             image,
             memory,
             view,
+            cube,
             set,
         })
     }
@@ -251,6 +324,7 @@ fn record_copy(
     staging: vk::Buffer,
     image: vk::Image,
     extent: vk::Extent3D,
+    layers: u32,
 ) {
     let to_transfer = vk::ImageMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::empty())
@@ -260,7 +334,7 @@ fn record_copy(
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .image(image)
-        .subresource_range(COLOUR_RANGE);
+        .subresource_range(colour_range(layers));
     let to_shader = vk::ImageMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
         .dst_access_mask(vk::AccessFlags::SHADER_READ)
@@ -269,7 +343,7 @@ fn record_copy(
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .image(image)
-        .subresource_range(COLOUR_RANGE);
+        .subresource_range(colour_range(layers));
     // The whole picture: rows packed tightly (0 = "same as the image's width/height").
     let region = vk::BufferImageCopy {
         buffer_offset: 0,
@@ -279,7 +353,7 @@ fn record_copy(
             aspect_mask: vk::ImageAspectFlags::COLOR,
             mip_level: 0,
             base_array_layer: 0,
-            layer_count: 1,
+            layer_count: layers, // § 23: all six faces in one copy, one after another
         },
         image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
         image_extent: extent,
@@ -328,5 +402,31 @@ unsafe fn destroy_parts(
         device.destroy_image_view(view, None);
         device.destroy_image(image, None);
         device.free_memory(memory, None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square(size: u32) -> Image {
+        Image {
+            width: size,
+            height: size,
+            rgba: vec![0; (size * size * 4) as usize],
+        }
+    }
+
+    #[test]
+    fn cube_faces_must_be_square_and_equal() {
+        let (a, b) = (square(4), square(8));
+        assert_eq!(check_cube_faces(&[&a; 6]).ok(), Some(4));
+        assert!(check_cube_faces(&[&a, &a, &a, &a, &a, &b]).is_err()); // sizes differ
+        let wide = Image {
+            width: 8,
+            height: 4,
+            rgba: vec![0; 128],
+        };
+        assert!(check_cube_faces(&[&wide; 6]).is_err()); // not square
     }
 }

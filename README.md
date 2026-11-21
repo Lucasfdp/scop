@@ -57,7 +57,8 @@ make run OBJ=resources/test/concave.obj TEXTURE="a.tga b.tga"  # one picture per
 | T | fade between the grey faces and the picture |
 | N | rotate which object gets which picture |
 | V | solid → wireframe → points |
-| C | colours: normal → facing (blue front, red back) → depth (near white, far dark) |
+| C | colours: normal → facing (blue front, red back) → depth (near white, far dark) → chrome (reflects the sky) |
+| E | sky on / off |
 | mouse wheel, Z / X | zoom in / out (narrows the field of view; the camera stays put) |
 | mouse drag | orbit the camera round the model |
 | B | light on / off (one sun-like light, fixed in the world) |
@@ -110,6 +111,9 @@ takes the next picture in turn. Pictures must be 24- or 32-bit TGA
 - Mouse orbit camera; one directional light with flat shading (off until B, so the
   mandatory greys are unchanged).
 - Instancing: G draws 512 copies of the model with one draw call per object.
+- Cube-map sky (E), generated at start with the sun where the light comes from (or six
+  `.tga` faces from `resources/sky/`: `px nx py ny pz nz`), and a chrome mode (C) that
+  reflects it.
 - Shader hot reload: save `scop/shaders/mesh.vert` or `mesh.frag` while scop runs and the
   change appears without restarting; a broken shader prints `glslc`'s error and the old one
   keeps running. Needs `glslc` and the repo's `scop/shaders/` folder; otherwise it switches off.
@@ -152,7 +156,7 @@ recorded in [`DECISIONS.md`](DECISIONS.md) (2026-11-03).
   uniforms and descriptors, depth buffer, the `.obj` parser, greys and controls, the TGA
   loader and textures, the fade, window resizing, the bonus (ear clipping, box mapping,
   a picture per object, view modes, zoom, FPS, drag & drop, debug colours, orbit camera,
-  lighting, shader hot reload, instancing) — plus the unit tests, the `Makefile`
+  lighting, shader hot reload, instancing, skybox and chrome) — plus the unit tests, the `Makefile`
   and `scripts/deps.sh`.
 - **Mine.** The choices (Rust + Vulkan, the engine/app split, and each decision in
   `DECISIONS.md`, picked from the trade-offs Claude laid out), running and checking every

@@ -14,6 +14,7 @@ layout(set = 0, binding = 1) readonly buffer Instances {
 layout(set = 0, binding = 0) uniform Camera {
     mat4 view_proj;   // projection × view, once per frame
     vec4 light;       // § 20: used by mesh.frag (same block there)
+    vec4 eye;         // § 23: used by mesh.frag (chrome)
 } camera;
 
 // Sticky note: pushed before each draw. Same block in mesh.frag (§ 15, § 19).
@@ -31,13 +32,16 @@ layout(location = 0) out vec3 colour;     // to the fragment shader (separate nu
 layout(location = 1) out vec2 uv;         // blended across the triangle by the rasteriser
 layout(location = 2) out float distance;  // § 19: how far from the camera (depth mode)
 layout(location = 3) out vec3 normal;     // § 20: the normal, turned with the model
+layout(location = 4) out vec3 world_position; // § 23: for chrome's reflections
 
 void main() {
     // § 22: this copy's own card first, then the sticky note (the whole crowd's place).
     // gl_InstanceIndex = which copy, counted from the draw's first instance.
     mat4 model = push.model * instances.instance[gl_InstanceIndex];
     // Right to left (§ 9): place the corner (w = 1: a point), then camera, then projection.
-    gl_Position = camera.view_proj * model * vec4(in_position, 1.0);
+    vec4 world = model * vec4(in_position, 1.0);
+    world_position = world.xyz;
+    gl_Position = camera.view_proj * world;
     colour = in_colour;
     uv = in_uv;
     // § 19: the perspective card's last row copied the distance into w (§ 9), so w

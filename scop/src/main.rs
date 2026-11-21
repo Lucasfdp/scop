@@ -2,6 +2,7 @@
 //! show and how keys behave; the engine does everything GPU- and window-related.
 
 mod hot_reload;
+mod sky;
 
 use std::env;
 use std::path::Path;
@@ -17,6 +18,11 @@ use engine::{
 const MESH_SHADERS: Shaders<'static> = Shaders {
     vertex: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.vert.spv")),
     fragment: include_bytes!(concat!(env!("OUT_DIR"), "/mesh.frag.spv")),
+};
+/// § 23: the sky's shaders.
+const SKY_SHADERS: Shaders<'static> = Shaders {
+    vertex: include_bytes!(concat!(env!("OUT_DIR"), "/sky.vert.spv")),
+    fragment: include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv")),
 };
 
 /// The cheerful picture (§ 14), embedded in the binary so scop works from any
@@ -58,10 +64,11 @@ const CROWD_COPY_SIZE: f32 = 0.8;
 /// How often the FPS in the title is updated, in seconds (§ 19, Q-19.2).
 const FPS_WINDOW: f32 = 0.5;
 /// What C cycles through (§ 19). The index is what the fragment shader gets.
-const COLOUR_MODES: [&str; 3] = [
+const COLOUR_MODES: [&str; 4] = [
     "normal",
     "facing (blue front, red back)",
     "depth (near white, far dark)",
+    "chrome (reflects the sky)",
 ];
 /// The draw styles V cycles through, in order (§ 18). Ones the GPU can't do are skipped.
 const STYLES: [DrawStyle; 3] = [DrawStyle::Fill, DrawStyle::Wireframe, DrawStyle::Points];
@@ -78,7 +85,8 @@ controls:
   T           fade between grey faces and the picture
   N           rotate which object gets which picture
   V           solid → wireframe → points
-  C           colours: normal → facing → depth
+  C           colours: normal → facing → depth → chrome
+  E           sky on / off
   wheel, Z/X  zoom in / out (field of view)
   mouse drag  orbit the camera round the model
   B           light on / off
@@ -242,6 +250,69 @@ struct Scop {
     crowd: bool,
     /// Seconds the crowd has been spinning (each copy's turn is worked out from it).
     crowd_time: f32,
+    /// § 23: the sky's six faces until `setup` uploads them.
+    sky_faces: Option<[Image; 6]>,
+    /// § 23: the background pipeline and the box it draws.
+    sky: Option<(PipelineId, MeshId)>,
+    /// § 23: E. Off at the start, so the mandatory part looks exactly as before.
+    sky_on: bool,
+}
+
+/// § 23: the sky box — a cube from −1 to +1, 6 faces × 2 triangles. Only the corner
+/// positions matter (they're the directions); colour, uv and normal are unused.
+fn sky_box() -> MeshData {
+    // Each face: the axis it sits on (0 = x, 1 = y, 2 = z) and which side (±1).
+    let mut vertices = Vec::new();
+    for axis in 0..3 {
+        for side in [-1.0_f32, 1.0] {
+            let corner = |a: f32, b: f32| {
+                let mut p = [0.0; 3];
+                p[axis] = side;
+                p[(axis + 1) % 3] = a;
+                p[(axis + 2) % 3] = b;
+                Vertex {
+                    position: p,
+                    colour: [0.0; 3],
+                    uv: [0.0; 2],
+                    normal: [0.0; 3],
+                }
+            };
+            // Two triangles; culling is off, so the winding doesn't matter.
+            for (a, b) in [
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (1.0, 1.0),
+                (-1.0, -1.0),
+                (1.0, 1.0),
+                (-1.0, 1.0),
+            ] {
+                vertices.push(corner(a, b));
+            }
+        }
+    }
+    let indices = (0..vertices.len() as u32).collect();
+    MeshData { vertices, indices }
+}
+
+/// § 23: how big the sky box is (half its side), for a view ending at `far`: its
+/// corners (√3 × half away) must stay inside the far plane, or they'd be cut off.
+fn sky_half_size(far: f32) -> f32 {
+    far * 0.5
+}
+
+/// § 23: six `.tga` faces from `folder` (px, nx, py, ny, pz, nz), if all are there and
+/// load; `None` otherwise (then scop generates its sky).
+fn load_sky(folder: &Path) -> Option<[Image; 6]> {
+    let paths = sky::FACE_NAMES.map(|name| folder.join(format!("{name}.tga")));
+    if !paths.iter().all(|p| p.is_file()) {
+        return None;
+    }
+    let mut faces = Vec::new();
+    for path in &paths {
+        let bytes = std::fs::read(path).ok()?;
+        faces.push(load_picture(&path.display().to_string(), &bytes)?);
+    }
+    faces.try_into().ok()
 }
 
 /// The crowd's copies (§ 22): a `CROWD_SIDE`³ grid, each copy shrunk and turning its
@@ -319,11 +390,21 @@ fn load_model(path: &Path) -> Result<LoadedModel, String> {
 impl Scop {
     /// § 21: a shader was saved. Compile both; on success swap every pipeline (one
     /// per style). Any error is printed and the old shaders keep drawing.
-    fn reload_shaders(&mut self, vertex: &[u8], fragment: &[u8], gfx: &mut Gfx<'_>) {
+    fn reload_shaders(&mut self, compiled: &hot_reload::Compiled, gfx: &mut Gfx<'_>) {
+        let (vertex, fragment) = (&compiled.mesh.0, &compiled.mesh.1);
         let shaders = Shaders { vertex, fragment };
         for &(style, pipeline) in &self.pipelines {
             if let Err(err) = gfx.replace_pipeline(pipeline, shaders, style) {
                 eprintln!("scop: shaders not reloaded ({style:?}): {err}");
+                return;
+            }
+        }
+        // § 23: the sky's pipeline too (it stays a background pipeline).
+        if let Some((pipeline, _)) = self.sky {
+            let (vertex, fragment) = (&compiled.sky.0, &compiled.sky.1);
+            let sky = Shaders { vertex, fragment };
+            if let Err(err) = gfx.replace_pipeline(pipeline, sky, DrawStyle::Fill) {
+                eprintln!("scop: sky shaders not reloaded: {err}");
                 return;
             }
         }
@@ -425,6 +506,15 @@ impl App for Scop {
         for picture in &self.pictures {
             self.textures.push(gfx.create_texture(picture)?);
         }
+        // § 23: the sky — pipeline, box, cube map — and the environment for chrome.
+        if let Some(faces) = self.sky_faces.take() {
+            let pipeline = gfx.create_background_pipeline(SKY_SHADERS)?;
+            let mesh = gfx.create_mesh(&sky_box())?;
+            let [a, b, c, d, e, f] = &faces;
+            let cube = gfx.create_cube_texture([a, b, c, d, e, f])?;
+            gfx.set_environment(cube)?;
+            self.sky = Some((pipeline, mesh));
+        }
         Ok(())
     }
 
@@ -440,14 +530,17 @@ impl App for Scop {
         if let Some(watch) = &mut self.shader_watch
             && watch.poll(dt)
         {
-            match watch.compile_both() {
-                Ok((vertex, fragment)) => self.reload_shaders(&vertex, &fragment, gfx),
+            match watch.compile_all() {
+                Ok(compiled) => self.reload_shaders(&compiled, gfx),
                 Err(err) => eprintln!("scop: shaders not reloaded:\n{err}"),
             }
         }
         // § 19: files dropped on the window. Only the last .obj stays on screen.
         for path in input.dropped_files() {
             self.open_dropped(path, gfx);
+        }
+        if input.pressed(Key::E) {
+            self.sky_on = !self.sky_on; // § 23
         }
         if input.pressed(Key::C) {
             self.colour_mode = (self.colour_mode + 1) % COLOUR_MODES.len();
@@ -537,7 +630,18 @@ impl App for Scop {
         let eye = self.orbit.eye(distance);
         let view = Mat4::look_at(eye, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0));
         frame.set_camera(projection * view);
+        frame.set_camera_position(eye); // § 23: chrome's reflections start from here
         frame.set_light(LIGHT_DIRECTION, if self.light_on { 1.0 } else { 0.0 });
+
+        // § 23: the sky first — a box centred on the camera, big but inside the far
+        // plane, drawn with depth writing off so the model always goes on top.
+        if let (true, Some((sky_pipeline, sky_mesh)), Some(&texture)) =
+            (self.sky_on, self.sky, self.textures.first())
+        {
+            let half = sky_half_size(far);
+            let place = Mat4::translation(eye) * Mat4::scale(Vec3::new(half, half, half));
+            frame.draw_with(sky_pipeline, sky_mesh, texture, place, [0.0; 4]);
+        }
 
         // The model's placement (the sticky note): one for the whole file, so the
         // objects keep their places relative to each other.
@@ -640,6 +744,16 @@ fn main() -> ExitCode {
         }
     }
 
+    // § 23: the sky — six faces from resources/sky/ if they're all there, else
+    // generated, with the sun where the § 20 light comes from.
+    let sky_faces = match load_sky(Path::new("resources/sky")) {
+        Some(faces) => faces,
+        None => {
+            println!("sky: generated (sun where the light comes from)");
+            sky::generate(-LIGHT_DIRECTION)
+        }
+    };
+
     // § 21: watch the shader sources this binary was built from (the path is
     // written in at build time), if they're still there and glslc is installed.
     let shader_folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("shaders");
@@ -678,6 +792,9 @@ fn main() -> ExitCode {
         shader_watch,
         crowd: false,
         crowd_time: 0.0,
+        sky_faces: Some(sky_faces),
+        sky: None,
+        sky_on: false,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -1097,6 +1214,29 @@ mod tests {
                 .iter()
                 .zip(&later)
                 .all(|(a, b)| a.to_cols_array() != b.to_cols_array())
+        );
+    }
+
+    #[test]
+    fn the_sky_box_fits_between_near_and_far() {
+        // scop's numbers for a model of radius 1: distance 2, near 0.01, far 22.
+        let (radius, distance) = (1.0, 2.0);
+        let (near, far) = (radius * 0.01, distance + radius * 20.0);
+        let half = sky_half_size(far);
+        assert!(half * 3f32.sqrt() < far, "corners cut off by the far plane");
+        assert!(half > near, "walls closer than the near plane");
+        // And it holds the whole model, with room for W/S to push it about.
+        assert!(half > distance + radius);
+    }
+
+    #[test]
+    fn sky_box_is_a_closed_cube() {
+        let mesh = sky_box();
+        assert_eq!(mesh.vertices.len(), 36); // 6 faces × 2 triangles × 3 corners
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.position.iter().all(|c| c.abs() == 1.0))
         );
     }
 

@@ -2,7 +2,7 @@
 section: 23
 slug: bonus-skybox
 tier: T1
-status: in-progress
+status: done
 prereqs: [11, 14, 20, 22]
 terms: [cube map, cube face, direction lookup, skybox, depth writing off, environment map, reflection, chrome, generated sky]
 ---

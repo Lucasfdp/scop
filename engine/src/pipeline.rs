@@ -42,6 +42,9 @@ pub enum DrawStyle {
 /// shared and destroyed there, not owned here.
 pub(crate) struct Pipeline {
     pub(crate) handle: vk::Pipeline,
+    /// § 23: false for background pipelines (the sky): they test depth but never write
+    /// it, so whatever is drawn after them always goes on top.
+    pub(crate) depth_write: bool,
 }
 
 impl Pipeline {
@@ -53,6 +56,7 @@ impl Pipeline {
         (colour_format, depth_format): (vk::Format, vk::Format),
         shaders: Shaders<'_>,
         style: DrawStyle,
+        depth_write: bool,
     ) -> Result<Self, GpuError> {
         let vertex_words = spirv::words_from_bytes(shaders.vertex)?;
         let fragment_words = spirv::words_from_bytes(shaders.fragment)?;
@@ -73,13 +77,17 @@ impl Pipeline {
             let (vertex, fragment) = modules?;
 
             let formats = (colour_format, depth_format);
-            let result = create_pipeline(device, layout, formats, (vertex, fragment), style);
+            let settings = (style, depth_write);
+            let result = create_pipeline(device, layout, formats, (vertex, fragment), settings);
 
             // The pipeline keeps its own compiled copy; the modules can go now.
             device.destroy_shader_module(vertex, None);
             device.destroy_shader_module(fragment, None);
 
-            Ok(Pipeline { handle: result? })
+            Ok(Pipeline {
+                handle: result?,
+                depth_write,
+            })
         }
     }
 
@@ -103,7 +111,7 @@ fn create_pipeline(
     layout: vk::PipelineLayout,
     (colour_format, depth_format): (vk::Format, vk::Format),
     (vertex, fragment): (vk::ShaderModule, vk::ShaderModule),
-    style: DrawStyle,
+    (style, depth_write): (DrawStyle, bool),
 ) -> Result<vk::Pipeline, GpuError> {
     // § 18: the only two settings that differ between the styles.
     let (topology, polygon_mode) = match style {
@@ -157,9 +165,10 @@ fn create_pipeline(
         vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
 
     // § 11: test every fragment against the depth buffer, and remember the winners.
+    // § 23: background pipelines test but don't remember (depth writing off).
     let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
         .depth_test_enable(true)
-        .depth_write_enable(true)
+        .depth_write_enable(depth_write)
         .depth_compare_op(DEPTH_COMPARE);
 
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];

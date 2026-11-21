@@ -23,7 +23,7 @@ use crate::pipeline::{DrawStyle, Pipeline, Shaders};
 use crate::shader_inputs::{INSTANCE_CAPACITY, ShaderInputs, push_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
-use crate::texture::Textures;
+use crate::texture::{Textures, WHITE_CUBE};
 use crate::tga::Image;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
@@ -295,6 +295,12 @@ impl GpuContext {
             }
             fail(e)
         })?;
+        // § 23: until the app sets one, the environment is the white cube. Written
+        // before the first frame, so nothing is using the sets yet.
+        if let Some((view, sampler)) = textures.cube(WHITE_CUBE) {
+            // SAFETY: no frame has been submitted.
+            unsafe { inputs.set_environment(&device, view, sampler) };
+        }
 
         Ok(GpuContext {
             _entry: entry,
@@ -337,7 +343,18 @@ impl GpuContext {
         shaders: Shaders<'_>,
         style: DrawStyle,
     ) -> Result<PipelineId, GpuError> {
-        let pipeline = self.build_pipeline(shaders, style)?;
+        let pipeline = self.build_pipeline(shaders, style, true)?;
+        self.pipelines.push(pipeline);
+        Ok(PipelineId(self.pipelines.len() - 1))
+    }
+
+    /// § 23: a solid pipeline with depth writing off, for backgrounds (the sky): drawn
+    /// first, it paints the background and leaves the depth image untouched.
+    pub(crate) fn create_background_pipeline(
+        &mut self,
+        shaders: Shaders<'_>,
+    ) -> Result<PipelineId, GpuError> {
+        let pipeline = self.build_pipeline(shaders, DrawStyle::Fill, false)?;
         self.pipelines.push(pipeline);
         Ok(PipelineId(self.pipelines.len() - 1))
     }
@@ -352,10 +369,11 @@ impl GpuContext {
         shaders: Shaders<'_>,
         style: DrawStyle,
     ) -> Result<(), GpuError> {
-        if id.0 >= self.pipelines.len() {
+        let Some(old) = self.pipelines.get(id.0) else {
             return Err(GpuError::UnknownHandle);
-        }
-        let new = self.build_pipeline(shaders, style)?;
+        };
+        // § 23: a background pipeline stays a background pipeline.
+        let new = self.build_pipeline(shaders, style, old.depth_write)?;
         // SAFETY: after the wait nothing on the GPU uses the old pipeline; it's
         // replaced in its slot, so it's destroyed exactly once.
         unsafe {
@@ -370,7 +388,12 @@ impl GpuContext {
     }
 
     /// One pipeline for the swapchain's format, after checking the style is possible.
-    fn build_pipeline(&self, shaders: Shaders<'_>, style: DrawStyle) -> Result<Pipeline, GpuError> {
+    fn build_pipeline(
+        &self,
+        shaders: Shaders<'_>,
+        style: DrawStyle,
+        depth_write: bool,
+    ) -> Result<Pipeline, GpuError> {
         // Checked here, so a missing feature is a clear error, not a validation
         // message (Q-18.4) — or, without validation, undefined behaviour.
         if !self.supports(style) {
@@ -384,6 +407,7 @@ impl GpuContext {
             (self.swapchain.format.format, self.depth.format),
             shaders,
             style,
+            depth_write,
         )
     }
 
@@ -431,6 +455,32 @@ impl GpuContext {
         };
         self.textures
             .add(&uploader, self.inputs.texture_set_layout, image)
+    }
+
+    /// § 23: uploads six square faces as one cube map (+x, −x, +y, −y, +z, −z).
+    pub(crate) fn create_cube_texture(&mut self, faces: [&Image; 6]) -> Result<usize, GpuError> {
+        let uploader = Uploader {
+            device: &self.device,
+            memory_types: &self.memory_types,
+            pool: self.frames.pool(),
+            queue: self.queue,
+        };
+        self.textures
+            .add_cube(&uploader, self.inputs.texture_set_layout, faces)
+    }
+
+    /// § 23: makes cube map `index` the environment every draw can read (set 0,
+    /// binding 2). Waits for the GPU first: frames in flight use the sets.
+    pub(crate) fn set_environment(&mut self, index: usize) -> Result<(), GpuError> {
+        let Some((view, sampler)) = self.textures.cube(index) else {
+            return Err(GpuError::Unsupported("the environment must be a cube map"));
+        };
+        // SAFETY: after the wait no submitted frame uses the sets.
+        unsafe {
+            self.device.device_wait_idle()?;
+            self.inputs.set_environment(&self.device, view, sampler);
+        }
+        Ok(())
     }
 
     /// After a resize (§ 16): waits for the GPU, then replaces the swapchain and the
@@ -532,7 +582,7 @@ impl GpuContext {
             // 1b. Only now is this slot's camera buffer free: the GPU has finished the
             //     last frame that read it (Q-10.2). Write this frame's camera.
             self.inputs
-                .write_camera(slot_index, frame.camera, frame.light);
+                .write_camera(slot_index, frame.camera, frame.light, frame.eye);
             // § 22: and this frame's instance list (position 0 stays the identity).
             self.inputs.write_instances(slot_index, &frame.instances);
 

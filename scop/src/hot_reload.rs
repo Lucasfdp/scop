@@ -11,17 +11,24 @@ use std::time::SystemTime;
 
 /// How often the files are checked, in seconds: quick enough to feel instant.
 const CHECK_EVERY: f32 = 0.25;
-/// The shaders watched, in the folder given to `ShaderWatch::start`.
-const VERTEX: &str = "mesh.vert";
-const FRAGMENT: &str = "mesh.frag";
+/// The shaders watched, in the folder given to `ShaderWatch::start`: the model's
+/// pair, then (§ 23) the sky's pair.
+const FILES: [&str; 4] = ["mesh.vert", "mesh.frag", "sky.vert", "sky.frag"];
 
-/// Watches `mesh.vert` and `mesh.frag` for saves.
+/// SPIR-V for both shader pairs, freshly compiled.
+pub struct Compiled {
+    /// (vertex, fragment) for the model.
+    pub mesh: (Vec<u8>, Vec<u8>),
+    /// (vertex, fragment) for the sky (§ 23).
+    pub sky: (Vec<u8>, Vec<u8>),
+}
+
+/// Watches the shader sources for saves.
 #[derive(Debug)]
 pub struct ShaderWatch {
-    vertex: PathBuf,
-    fragment: PathBuf,
-    /// The modification times seen at the last check (vertex, fragment).
-    last_seen: [Option<SystemTime>; 2],
+    files: [PathBuf; 4],
+    /// The modification times seen at the last check, one per file.
+    last_seen: [Option<SystemTime>; 4],
     /// Seconds since the last check.
     since_check: f32,
 }
@@ -30,18 +37,16 @@ impl ShaderWatch {
     /// Starts watching `folder`, or says why hot reload can't work here: the shader
     /// sources aren't there (scop run away from its repo), or `glslc` isn't installed.
     pub fn start(folder: &Path) -> Result<Self, String> {
-        let vertex = folder.join(VERTEX);
-        let fragment = folder.join(FRAGMENT);
-        if !vertex.is_file() || !fragment.is_file() {
+        let files = FILES.map(|name| folder.join(name));
+        if !files.iter().all(|f| f.is_file()) {
             return Err(format!("no shader sources in {}", folder.display()));
         }
         if !glslc_available() {
             return Err(String::from("glslc isn't installed (`make deps` says how)"));
         }
         let mut watch = ShaderWatch {
-            vertex,
-            fragment,
-            last_seen: [None, None],
+            files,
+            last_seen: [None; 4],
             since_check: 0.0,
         };
         // What's on disk now is the starting point: only *later* saves reload.
@@ -50,7 +55,7 @@ impl ShaderWatch {
     }
 
     /// One frame of `dt` seconds. Every `CHECK_EVERY` seconds, reads the files'
-    /// modification times; `true` if either shader was saved since the last check.
+    /// modification times; `true` if any shader was saved since the last check.
     pub fn poll(&mut self, dt: f32) -> bool {
         self.since_check += dt;
         if self.since_check < CHECK_EVERY {
@@ -64,20 +69,24 @@ impl ShaderWatch {
     /// Compares `now` with what was seen last time, and remembers `now`. So each save
     /// is reported exactly once — even if compiling it then fails (the next save is a
     /// new change and gets its own try).
-    fn changed(&mut self, now: [Option<SystemTime>; 2]) -> bool {
+    fn changed(&mut self, now: [Option<SystemTime>; 4]) -> bool {
         let changed = now != self.last_seen;
         self.last_seen = now;
         changed
     }
 
-    fn modification_times(&self) -> [Option<SystemTime>; 2] {
+    fn modification_times(&self) -> [Option<SystemTime>; 4] {
         let mtime = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
-        [mtime(&self.vertex), mtime(&self.fragment)]
+        [0, 1, 2, 3].map(|i| mtime(&self.files[i]))
     }
 
-    /// Compiles both shaders: (vertex SPIR-V, fragment SPIR-V), or `glslc`'s error.
-    pub fn compile_both(&self) -> Result<(Vec<u8>, Vec<u8>), String> {
-        Ok((compile(&self.vertex)?, compile(&self.fragment)?))
+    /// Compiles all four shaders, or returns the first `glslc` error.
+    pub fn compile_all(&self) -> Result<Compiled, String> {
+        let [mv, mf, sv, sf] = &self.files;
+        Ok(Compiled {
+            mesh: (compile(mv)?, compile(mf)?),
+            sky: (compile(sv)?, compile(sf)?),
+        })
     }
 }
 
@@ -112,10 +121,9 @@ mod tests {
     use std::time::Duration;
 
     /// A watch on made-up files, for the change logic alone (no disk, no glslc).
-    fn watch_with(last_seen: [Option<SystemTime>; 2]) -> ShaderWatch {
+    fn watch_with(last_seen: [Option<SystemTime>; 4]) -> ShaderWatch {
         ShaderWatch {
-            vertex: PathBuf::from("v"),
-            fragment: PathBuf::from("f"),
+            files: ["a", "b", "c", "d"].map(PathBuf::from),
             last_seen,
             since_check: 0.0,
         }
@@ -125,15 +133,18 @@ mod tests {
     fn a_save_is_noticed_exactly_once() {
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let t1 = t0 + Duration::from_secs(1);
-        let mut watch = watch_with([Some(t0), Some(t0)]);
-        assert!(!watch.changed([Some(t0), Some(t0)])); // nothing saved: no reload
-        assert!(watch.changed([Some(t0), Some(t1)])); // mesh.frag saved
-        assert!(!watch.changed([Some(t0), Some(t1)])); // same save: not again
+        let mut watch = watch_with([Some(t0); 4]);
+        assert!(!watch.changed([Some(t0); 4])); // nothing saved: no reload
+        let frag_saved = [Some(t0), Some(t1), Some(t0), Some(t0)];
+        assert!(watch.changed(frag_saved)); // mesh.frag saved
+        assert!(!watch.changed(frag_saved)); // same save: not again
+        let sky_saved = [Some(t0), Some(t1), Some(t0), Some(t1)];
+        assert!(watch.changed(sky_saved)); // § 23: the sky's shaders count too
     }
 
     #[test]
     fn checks_only_every_quarter_second() {
-        let mut watch = watch_with([None, None]);
+        let mut watch = watch_with([None; 4]);
         assert!(!watch.poll(0.1));
         assert!((watch.since_check - 0.1).abs() < 1e-6); // not checked yet
         watch.poll(0.2); // 0.3 s ≥ 0.25: checks, and starts counting again

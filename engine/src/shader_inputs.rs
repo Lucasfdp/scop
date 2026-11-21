@@ -6,8 +6,9 @@
 //!
 //! Shader side (must match):
 //! ```glsl
-//! layout(set = 0, binding = 0) uniform Camera { mat4 view_proj; vec4 light; } camera;
+//! layout(set = 0, binding = 0) uniform Camera { mat4 view_proj; vec4 light; vec4 eye; } camera;
 //! layout(set = 0, binding = 1) readonly buffer Instances { mat4 instance[]; } instances;
+//! layout(set = 0, binding = 2) uniform samplerCube environment;   // § 23
 //! layout(push_constant) uniform Push { mat4 model; vec4 params; } push;
 //! ```
 
@@ -22,15 +23,17 @@ use crate::maths::Mat4;
 /// One `mat4` in std140: 16 floats, 64 bytes.
 pub(crate) const MAT4_SIZE: usize = 64;
 
-/// The noticeboard (§ 10, § 20): `view_proj` (bytes 0..64) + the light (64..80):
-/// direction it shines in (xyz) and strength (w, 0 = off).
-pub(crate) const CAMERA_SIZE: usize = MAT4_SIZE + 16;
+/// The noticeboard (§ 10, § 20, § 23): `view_proj` (bytes 0..64) + the light (64..80):
+/// direction it shines in (xyz) and strength (w, 0 = off) + the camera's position
+/// (80..96, w = 1), for reflections.
+pub(crate) const CAMERA_SIZE: usize = MAT4_SIZE + 32;
 
-/// The camera buffer's bytes, laid out like `{ mat4 view_proj; vec4 light; }`.
-pub(crate) fn camera_bytes(view_proj: Mat4, light: [f32; 4]) -> [u8; CAMERA_SIZE] {
+/// The camera buffer's bytes, laid out like `{ mat4 view_proj; vec4 light; vec4 eye; }`.
+pub(crate) fn camera_bytes(view_proj: Mat4, light: [f32; 4], eye: [f32; 4]) -> [u8; CAMERA_SIZE] {
     let mut bytes = [0u8; CAMERA_SIZE];
     bytes[..MAT4_SIZE].copy_from_slice(&mat4_bytes(view_proj));
-    for (chunk, value) in bytes[MAT4_SIZE..].chunks_exact_mut(4).zip(light) {
+    let floats = light.into_iter().chain(eye);
+    for (chunk, value) in bytes[MAT4_SIZE..].chunks_exact_mut(4).zip(floats) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
     bytes
@@ -115,6 +118,13 @@ impl ShaderInputs {
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::VERTEX),
+            // § 23: binding 2 = the environment cube map, read by fragment shaders
+            // (the sky, chrome). Pointed at a cube by `set_environment`.
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(2)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         ];
         // Set 1 (§ 14): one picture + its sampler, read by the fragment shader.
         let texture_bindings = [vk::DescriptorSetLayoutBinding::default()
@@ -134,6 +144,9 @@ impl ShaderInputs {
                 .descriptor_count(slot_count as u32),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(slot_count as u32),
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(slot_count as u32),
         ];
 
@@ -259,7 +272,7 @@ impl ShaderInputs {
                 }
             };
 
-            // The descriptor write: "binding 0 of this set = this buffer, bytes 0..80".
+            // The descriptor write: "binding 0 of this set = this buffer, bytes 0..96".
             // Done once; afterwards only the buffer's contents change (Q-10.4).
             let buffer_info = [vk::DescriptorBufferInfo::default()
                 .buffer(buffer.handle)
@@ -294,7 +307,12 @@ impl ShaderInputs {
             let identity = mat4_bytes(Mat4::IDENTITY);
             ptr::copy_nonoverlapping(identity.as_ptr(), camera.instances_mapped, MAT4_SIZE);
             // Valid even if the app never sets one: identity camera, light off.
-            write_camera_bytes(camera.mapped, Mat4::IDENTITY, [0.0; 4]);
+            write_camera_bytes(
+                camera.mapped,
+                Mat4::IDENTITY,
+                [0.0; 4],
+                [0.0, 0.0, 0.0, 1.0],
+            );
             Ok(camera)
         }
     }
@@ -304,9 +322,45 @@ impl ShaderInputs {
     /// # Safety
     /// The caller must have waited on that slot's fence: the GPU may still be
     /// reading the buffer otherwise (Q-10.2).
-    pub(crate) unsafe fn write_camera(&self, slot: usize, view_proj: Mat4, light: [f32; 4]) {
-        // SAFETY: `mapped` points at 80 writable bytes; the caller guarantees the GPU isn't reading them.
-        unsafe { write_camera_bytes(self.cameras[slot].mapped, view_proj, light) };
+    pub(crate) unsafe fn write_camera(
+        &self,
+        slot: usize,
+        view_proj: Mat4,
+        light: [f32; 4],
+        eye: [f32; 4],
+    ) {
+        // SAFETY: `mapped` points at 96 writable bytes; the caller guarantees the GPU isn't reading them.
+        unsafe { write_camera_bytes(self.cameras[slot].mapped, view_proj, light, eye) };
+    }
+
+    /// § 23: points binding 2 of every slot's set at the cube `view` (the environment).
+    ///
+    /// # Safety
+    /// No submitted frame may be using the sets: call after `device_wait_idle`, or
+    /// before the first frame.
+    pub(crate) unsafe fn set_environment(
+        &self,
+        device: &Device,
+        view: vk::ImageView,
+        sampler: vk::Sampler,
+    ) {
+        let image_info = [vk::DescriptorImageInfo::default()
+            .sampler(sampler)
+            .image_view(view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let writes: Vec<_> = self
+            .cameras
+            .iter()
+            .map(|camera| {
+                vk::WriteDescriptorSet::default()
+                    .dst_set(camera.set)
+                    .dst_binding(2)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(&image_info)
+            })
+            .collect();
+        // SAFETY: guaranteed by the caller.
+        unsafe { device.update_descriptor_sets(&writes, &[]) };
     }
 
     /// Writes this frame's instance matrices into slot `slot`'s list, from position 1
@@ -352,12 +406,12 @@ impl ShaderInputs {
     }
 }
 
-/// Copies the camera's 80 bytes to `dst`.
+/// Copies the camera's 96 bytes to `dst`.
 ///
 /// # Safety
-/// `dst` must point at 80 writable bytes nobody else is using.
-unsafe fn write_camera_bytes(dst: *mut u8, view_proj: Mat4, light: [f32; 4]) {
-    let bytes = camera_bytes(view_proj, light);
+/// `dst` must point at 96 writable bytes nobody else is using.
+unsafe fn write_camera_bytes(dst: *mut u8, view_proj: Mat4, light: [f32; 4], eye: [f32; 4]) {
+    let bytes = camera_bytes(view_proj, light, eye);
     // SAFETY: guaranteed by the caller; `bytes` is a local, so no overlap.
     unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), dst, CAMERA_SIZE) };
 }
@@ -380,14 +434,19 @@ mod tests {
     }
 
     #[test]
-    fn camera_bytes_put_the_light_after_the_matrix() {
-        let bytes = camera_bytes(Mat4::IDENTITY, [0.5, -1.0, 0.25, 1.0]);
-        assert_eq!(bytes.len(), 80);
+    fn camera_bytes_put_the_light_then_the_eye_after_the_matrix() {
+        let bytes = camera_bytes(Mat4::IDENTITY, [0.5, -1.0, 0.25, 1.0], [3.0, 4.0, 5.0, 1.0]);
+        assert_eq!(bytes.len(), 96);
         assert_eq!(bytes[..64], mat4_bytes(Mat4::IDENTITY));
         let float_at = |i: usize| f32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap());
         assert_eq!(
             [float_at(64), float_at(68), float_at(72), float_at(76)],
             [0.5, -1.0, 0.25, 1.0]
+        );
+        // § 23: the camera's position, after the light.
+        assert_eq!(
+            [float_at(80), float_at(84), float_at(88), float_at(92)],
+            [3.0, 4.0, 5.0, 1.0]
         );
     }
 
