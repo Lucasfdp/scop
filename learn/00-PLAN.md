@@ -121,6 +121,8 @@ and **lighting**. Those are deliberately left to ft_newton and ft_vox.
 | 21 | `21-bonus-shader-hot-reload.md` | Shaders that reload while running | T1 | not started | Edit a shader, see it change without restarting |
 | 22 | `22-bonus-instancing.md` | Hundreds of copies in one draw | T2 | not started | Hundreds of spinning logos from one mesh and one draw |
 | 23 | `23-bonus-skybox.md` | A sky around the scene | T1 | not started | Cube-map skybox, plus a chrome (reflective) mode |
+| 24 | `24-engine-consolidation.md` | Moving the bonus features into the engine | T1 | not started | Same scop, reusable engine: camera, transforms, tween, mesh builder, hot reload, sky, default shaders |
+| 25 | `25-dynamic-reflections.md` | Live reflections (render to a cube map) | T1 | not started | Chrome reflects whatever is around it |
 
 Sections 3–19 are written when you reach them, so the plan adapts to what turns
 out to be hard.

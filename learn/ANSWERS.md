@@ -682,3 +682,27 @@ a disco ball. Smooth (averaged) normals would give a smooth chrome.
 **A-23.5** So everything tells the same story: the model's bright side (§ 20 light) faces the sun you see
 in the sky and in its reflections. With the sun elsewhere, the model would be lit from one side while
 the sky's sun sits on another — it looks fake immediately, even if you can't say why.
+
+## Section 24
+
+**A-24.1** **scop.** Another project wouldn't want grey faces unchanged — they exist because the subject
+asks for distinguishable greys: a choice, not a mechanism. What goes to the engine is the *mechanism*:
+building one mesh per object with its own corners and flat normals, with the colour asked for through a
+**callback** — scop's callback returns its greys.
+
+**A-24.2** Because the flip comes from the engine's own camera maths (`look_at` with a fixed "up"): it's a
+property of the engine's camera, not of an app. If each app had to remember the clamp, some would forget
+and get the snap upside down over the top. The engine owns the guard (as a setting with a safe default).
+
+**A-24.3** Write your own shaders (an **override**), make a pipeline from them, and draw with `draw_with`,
+whose four numbers mean whatever your shaders say. Reusing the default pipeline would feed your numbers
+into shaders that read them as blend / colour mode / depth range — wrong colours, silently. Each pipeline
+owns the meaning of its push params.
+
+**A-24.4** Only the app knows which of its pipelines were built from which shaders, in which style (fill,
+wireframe, points, background). The engine just sees pipelines and bytes. The general half — noticing a
+save and compiling — is the same for every project, so it moves; the mapping stays with the app.
+
+**A-24.5** The camera's "up" is hard-coded as +y: in a +z-up world, orbiting climbs the wrong way, the
+horizon tilts, and the pitch clamp guards the wrong axis. The **up axis** (and the clamp relative to it)
+should be a setting, with +y as the default so scop doesn't change.

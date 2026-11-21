@@ -1591,3 +1591,35 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### generated sky
 **Plain:** scop's built-in cube map, computed at start: gradient, horizon, ground, sun where the light is.
 **Introduced in:** § 23
+
+### consolidation
+**Plain:** gathering scattered, reusable code into the one place every project uses.
+**Introduced in:** § 24
+
+### reuse test
+**Plain:** wanted unchanged by another project? → engine. A choice this app made? → app.
+**Introduced in:** § 24
+
+### default shaders
+**Plain:** shaders the engine ships and compiles itself (lighting, chrome, debug colours, sky).
+**Introduced in:** § 24
+
+### shader override
+**Plain:** an app's own shaders used instead of the engine's defaults.
+**Introduced in:** § 24
+
+### hard-coded vs setting
+**Plain:** a value written into the code vs one the caller chooses, with a sensible default.
+**Introduced in:** § 24
+
+### mesh builder
+**Plain:** the engine's .obj → meshes step: per-object meshes, own corners, flat normals, optional box UVs, colour callback.
+**Introduced in:** § 24
+
+### colour callback
+**Plain:** a function the app hands the engine (face n → colour), so the rule stays the app's.
+**Introduced in:** § 24
+
+### tween
+**Plain:** a value that eases towards a target over time (the § 15 fade, generalised).
+**Introduced in:** § 24
