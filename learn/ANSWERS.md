@@ -706,3 +706,29 @@ save and compiling — is the same for every project, so it moves; the mapping s
 **A-24.5** The camera's "up" is hard-coded as +y: in a +z-up world, orbiting climbs the wrong way, the
 horizon tilts, and the pitch clamp guards the wrong axis. The **up axis** (and the clamp relative to it)
 should be a setting, with +y as the default so scop doesn't change.
+
+## Section 25
+
+**A-25.1** The probe sits **inside** the model. Drawing the model into its own cube would fill the six
+views with the model's inside surfaces, so chrome would reflect its own (dark, inside-out) insides
+instead of the surroundings. Excluding it keeps the reflection about what's *around* it — the same
+limit as § 23: the model never reflects itself.
+
+**A-25.2** Because what's around the model can change every frame: the background colour, the sky being
+switched on or off, other objects moving (later projects: a whole world). A capture made once would be
+§ 23's fixed picture again. (The orbit alone doesn't change it — the probe is at the model, not the
+camera — but anything in the scene does.)
+
+**A-25.3** **Fixed:** the sky (§ 23's cube is always bound, even when the sky isn't drawn). **Live:** green —
+the probe sees only the green background in every direction, so the whole model reflects flat green
+(a clean silhouette, as the owner accepted).
+
+**A-25.4** Chrome may read the cube **while it's still being drawn**, or in the wrong layout: last frame's
+reflection, half-finished faces, flicker — or garbage on some GPUs. Yes: validation reports the image
+being sampled in the wrong layout (still "being drawn into" instead of "read by shaders"). Without
+validation it's undefined.
+
+**A-25.5** It's expensive: six more views of the scene each frame, up to seven times the drawing — so only
+when someone can see it (chrome mode). And a reflection is a small, curved part of the screen where
+detail is lost anyway: 256² per face is plenty, and six window-sized faces would multiply the cost again
+for nothing visible.

@@ -2,7 +2,7 @@
 section: 24
 slug: engine-consolidation
 tier: T1
-status: in-progress
+status: done
 prereqs: [8, 18, 19, 20, 21, 22, 23]
 terms: [consolidation, reuse test, default shaders, shader override, hard-coded vs setting, mesh builder, colour callback, tween]
 ---

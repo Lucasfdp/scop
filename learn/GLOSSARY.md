@@ -1623,3 +1623,31 @@ Same idea ("wait until that's done"), different **waiter**. Ask *who waits for w
 ### tween
 **Plain:** a value that eases towards a target over time (the § 15 fade, generalised).
 **Introduced in:** § 24
+
+### render to texture
+**Plain:** drawing into an ordinary image instead of the screen, then using it as a texture.
+**Introduced in:** § 25
+
+### render target
+**Plain:** the image a pass draws into (colour, plus its own depth image).
+**Introduced in:** § 25
+
+### reflection probe
+**Plain:** a point where the scene is captured into a cube map each frame, for reflections.
+**Introduced in:** § 25
+
+### cube face camera
+**Plain:** one of a probe's six cameras: square, 90° wide, looking at one wall of the cube.
+**Introduced in:** § 25
+
+### probe exclusion
+**Plain:** draws left out of the probe's views (the reflective model itself).
+**Introduced in:** § 25
+
+### offscreen pass
+**Plain:** drawing that isn't shown (the probe's six views), recorded before the main pass.
+**Introduced in:** § 25
+
+### layout hand-over
+**Plain:** the barrier turning the probe's image from 'drawn into' to 'read by shaders'.
+**Introduced in:** § 25
