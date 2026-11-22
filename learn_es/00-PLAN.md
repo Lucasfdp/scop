@@ -118,11 +118,13 @@ una matriz de modelo) y la **iluminación**. Eso queda a propósito para ft_newt
 | 16 | `16-mandatory-finish.md` | Dejar la parte obligatoria perfecta | T1 | hecho | Redimensionado, `make` de una línea, README, autoevaluación |
 | 17 | `17-bonus-complex-obj.md` | Caras cóncavas y no planas | T1 | hecho | La tetera original se ve limpia |
 | 18 | `18-bonus-texture-mapping.md` | Texturas sin estiramiento | T1 | hecho | Ninguna cara estirada |
-| 19 | `19-bonus-quality-of-life.md` | Comodidades: FPS, arrastrar y soltar, colores de depuración | T1 | en curso | FPS en el título, soltar un `.obj` para cargarlo, modos de color de depuración (orientación / profundidad) |
-| 20 | `20-bonus-camera-and-lighting.md` | Una cámara que manejas, y luz | T2 | sin empezar | Cámara orbital con el ratón; una luz direccional que sombrea las caras según su ángulo |
-| 21 | `21-bonus-shader-hot-reload.md` | Shaders que se recargan en marcha | T1 | sin empezar | Editar un shader y ver el cambio sin reiniciar |
-| 22 | `22-bonus-instancing.md` | Cientos de copias en un solo draw | T2 | sin empezar | Cientos de logos girando con una mesh y un draw |
-| 23 | `23-bonus-skybox.md` | Un cielo alrededor de la escena | T1 | sin empezar | Skybox con cube map, más un modo cromado (reflectante) |
+| 19 | `19-bonus-quality-of-life.md` | Comodidades: FPS, arrastrar y soltar, colores de depuración | T1 | hecho | FPS en el título, soltar un `.obj` para cargarlo, modos de color de depuración (orientación / profundidad) |
+| 20 | `20-bonus-camera-and-lighting.md` | Una cámara que manejas, y luz | T2 | hecho | Cámara orbital con el ratón; una luz direccional que sombrea las caras según su ángulo |
+| 21 | `21-bonus-shader-hot-reload.md` | Shaders que se recargan en marcha | T1 | hecho | Editar un shader y ver el cambio sin reiniciar |
+| 22 | `22-bonus-instancing.md` | Cientos de copias en un solo draw | T2 | hecho | Cientos de logos girando con una mesh y un draw |
+| 23 | `23-bonus-skybox.md` | Un cielo alrededor de la escena | T1 | hecho | Skybox con cube map, más un modo cromado (reflectante) |
+| 24 | `24-engine-consolidation.md` | Llevar las funciones del bonus al engine | T1 | en curso | El mismo scop, engine reutilizable: cámara, transformaciones, tween, constructor de meshes, recarga en caliente, cielo, shaders por defecto |
+| 25 | `25-dynamic-reflections.md` | Reflejos en vivo (renderizar a un cube map) | T1 | sin empezar | El cromado refleja lo que tenga alrededor |
 
 Las secciones 3–19 se escriben cuando llegues a ellas, para que el plan se adapte a lo
 que resulte difícil.

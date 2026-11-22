@@ -1,6 +1,6 @@
 #version 450
 
-// § 23: the sky box. A cube centred on the camera (scop's model card moves it to the
+// § 23: the sky box. A cube centred on the camera (`Sky::draw`'s model card moves it to the
 // camera and makes it big), drawn first with depth writing off.
 
 layout(set = 0, binding = 0) uniform Camera {
@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform Camera {
     vec4 eye;
 } camera;
 
-// Same sticky note as mesh.vert (the pipeline layout is shared); only `model` is used.
+// Same sticky note as default.vert (the pipeline layout is shared); only `model` is used.
 layout(push_constant) uniform Push {
     mat4 model;
     vec4 params;

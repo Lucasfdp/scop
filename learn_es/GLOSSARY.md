@@ -1452,3 +1452,175 @@ La misma idea ("espera a que eso termine"), distinto **quien espera**. Pregúnta
 ### push params
 **Llano:** cuatro números definidos por la app en el bloque de push junto a la matriz de modelo (scop: fundido, modo de depuración, rango de profundidad).
 **Introducido en:** § 19
+
+### orbit camera
+**Llano:** una cámara sobre una esfera alrededor de un objetivo, mirándolo siempre (yaw, pitch, distancia).
+**Introducido en:** § 20
+
+### yaw and pitch
+**Llano:** yaw = rodear el objetivo; pitch = pasar por encima o por debajo de él.
+**Introducido en:** § 20
+
+### pitch clamp
+**Llano:** parar el pitch justo antes de la vertical arriba/abajo (±89°) para que la cámara nunca se dé la vuelta.
+**Introducido en:** § 20
+
+### look-at
+**Llano:** la tarjeta de vista del engine: ponte aquí, mira aquello, por aquí es arriba.
+**Introducido en:** § 20
+
+### mouse delta
+**Llano:** cuánto se movió el ratón en este fotograma, en píxeles — la cámara gira según el movimiento, no la posición.
+**Introducido en:** § 20
+
+### directional light
+**Llano:** luz desde una dirección en todas partes, como el sol: una dirección, sin posición.
+**Introducido en:** § 20
+
+### normal
+**Llano:** la dirección hacia la que apunta una cara, de longitud 1; una por esquina, enviada a los shaders.
+**Introducido en:** § 20
+
+### flat shading
+**Llano:** cada esquina de una cara lleva la normal de la cara: un brillo por cara, aristas nítidas.
+**Introducido en:** § 20
+
+### diffuse
+**Llano:** brillo por mirar a la luz: completo de frente, nada de lado o de espaldas.
+**Introducido en:** § 20
+
+### ambient
+**Llano:** un pequeño brillo constante en todas partes, para que las caras de espaldas no queden negras.
+**Introducido en:** § 20
+
+### world-fixed light
+**Llano:** la dirección de la luz pertenece al mundo, no a la cámara; orbitar no la mueve.
+**Introducido en:** § 20
+
+### normal transform
+**Llano:** girar las normales con la rotación del modelo (la matriz de modelo sin su movimiento).
+**Introducido en:** § 20
+
+### hot reload
+**Llano:** sustituir parte de un programa en marcha (sus shaders) sin reiniciarlo.
+**Introducido en:** § 21
+
+### runtime shader compile
+**Llano:** ejecutar `glslc` desde dentro de scop y leer el SPIR-V que produce.
+**Introducido en:** § 21
+
+### modification time
+**Llano:** cuándo se escribió por última vez un archivo (mtime); guardar la cambia, leer no.
+**Introducido en:** § 21
+
+### polling
+**Llano:** comprobar repetidamente si algo ha cambiado, en vez de que te avisen.
+**Introducido en:** § 21
+
+### pipeline swap
+**Llano:** construir el pipeline nuevo, esperar a la GPU, destruir el viejo, reutilizar su hueco y su id.
+**Introducido en:** § 21
+
+### shader contract
+**Llano:** lo que un shader espera del lado de Rust (entradas de vértice, bloques, texturas); la recarga en caliente solo funciona dentro de él.
+**Introducido en:** § 21
+
+### draw call
+**Llano:** un comando "dibuja esta mesh" grabado en el command buffer.
+**Introducido en:** § 22
+
+### instancing
+**Llano:** dibujar una mesh muchas veces con una sola draw call.
+**Introducido en:** § 22
+
+### instance
+**Llano:** una copia en un draw con instancing.
+**Introducido en:** § 22
+
+### instance index
+**Llano:** qué copia está procesando el vertex shader (`gl_InstanceIndex`).
+**Introducido en:** § 22
+
+### first instance
+**Llano:** dónde empiezan en la lista de instancias las copias de un draw (draws normales: 0, la identidad).
+**Introducido en:** § 22
+
+### instance buffer
+**Llano:** la lista de datos por copia (una matriz por copia), reescrita cada fotograma, una por slot de fotograma.
+**Introducido en:** § 22
+
+### storage buffer
+**Llano:** un buffer que un shader lee como un array de cualquier longitud; los uniform buffers son para bloques pequeños y fijos.
+**Introducido en:** § 22
+
+### draw-call overhead
+**Llano:** el coste por draw (grabación en la CPU, arranque en la GPU), que se vuelve a pagar en cada draw por pequeño que sea.
+**Introducido en:** § 22
+
+### cube map
+**Llano:** seis imágenes cuadradas (caras interiores de una caja) guardadas como una textura, consultada con una dirección.
+**Introducido en:** § 23
+
+### cube face
+**Llano:** una de las seis imágenes de un cube map: +x, −x, +y, −y, +z, −z (el orden de capas de Vulkan).
+**Introducido en:** § 23
+
+### direction lookup
+**Llano:** muestrear un cube map con una dirección (`samplerCube`); la GPU elige la cara y el punto.
+**Introducido en:** § 23
+
+### skybox
+**Llano:** una caja grande alrededor de la cámara, que se mueve con ella, coloreada a partir del cube map.
+**Introducido en:** § 23
+
+### depth writing off
+**Llano:** comprobar contra la imagen de profundidad pero sin escribir en ella; el cielo pinta el fondo sin tapar nada.
+**Introducido en:** § 23
+
+### environment map
+**Llano:** un cube map para lo que rodea la escena (cielo, reflejos); el de scop está en el set 0.
+**Introducido en:** § 23
+
+### reflection
+**Llano:** la dirección de la vista rebotada en una superficie (`reflect`): hacia donde mira un espejo.
+**Introducido en:** § 23
+
+### chrome
+**Llano:** modo de color 4: cada píxel muestra el cielo en su dirección de reflejo.
+**Introducido en:** § 23
+
+### generated sky
+**Llano:** el cube map incorporado de scop, calculado al arrancar: degradado, horizonte, suelo, sol donde está la luz.
+**Introducido en:** § 23
+
+### consolidation
+**Llano:** reunir código reutilizable y disperso en el único sitio que usa todo proyecto.
+**Introducido en:** § 24
+
+### reuse test
+**Llano:** ¿lo querría sin cambios otro proyecto? → engine. ¿Es una decisión que tomó esta app? → app.
+**Introducido en:** § 24
+
+### default shaders
+**Llano:** shaders que el engine incluye y compila él mismo (iluminación, cromado, colores de depuración, cielo).
+**Introducido en:** § 24
+
+### shader override
+**Llano:** los shaders propios de una app usados en vez de los de por defecto del engine.
+**Introducido en:** § 24
+
+### hard-coded vs setting
+**Llano:** un valor escrito en el código frente a uno que elige quien llama, con un valor por defecto razonable.
+**Introducido en:** § 24
+
+### mesh builder
+**Llano:** el paso .obj → meshes del engine: meshes por objeto, esquinas propias, normales planas, UVs box opcionales, callback de color.
+**Introducido en:** § 24
+
+### colour callback
+**Llano:** una función que la app le pasa al engine (cara n → color), para que la regla siga siendo de la app.
+**Introducido en:** § 24
+
+### tween
+**Llano:** un valor que se suaviza hacia un objetivo con el tiempo (el fundido de § 15, generalizado).
+**Introducido en:** § 24

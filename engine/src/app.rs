@@ -2,6 +2,7 @@
 //! calls, and the small types an app uses to talk back — `Gfx` at setup, `Frame`
 //! every frame, and handles instead of GPU objects.
 
+use crate::defaults::{DEFAULT_SHADERS, SKY_SHADERS};
 use crate::gpu::GpuContext;
 use crate::input::Input;
 use crate::maths::{Mat4, Vec3};
@@ -9,6 +10,7 @@ use crate::mesh::MeshData;
 use crate::pipeline::{DrawStyle, Shaders};
 use crate::platform::RunError;
 use crate::shader_inputs::INSTANCE_CAPACITY;
+use crate::sky::{Sky, sky_box};
 use crate::tga::Image;
 
 /// What an app implements. The engine owns the loop and calls these
@@ -104,6 +106,27 @@ impl Gfx<'_> {
     /// GPU (a short pause). Default: a white cube.
     pub fn set_environment(&mut self, cube: TextureId) -> Result<(), RunError> {
         Ok(self.gpu.set_environment(cube.0)?)
+    }
+
+    /// A pipeline with the engine's **default shaders** (§ 24) in `style`: fade,
+    /// lighting, chrome and debug colours. Fill its four numbers with `DefaultParams`.
+    pub fn create_default_pipeline(&mut self, style: DrawStyle) -> Result<PipelineId, RunError> {
+        self.create_styled_pipeline(DEFAULT_SHADERS, style)
+    }
+
+    /// A ready-made sky (§ 24): the background pipeline with the default sky shaders,
+    /// the sky box, and `faces` uploaded as a cube map — which also becomes the
+    /// environment (what chrome reflects). Draw it with `Sky::draw`, first each frame.
+    pub fn create_default_sky(&mut self, faces: [&Image; 6]) -> Result<Sky, RunError> {
+        let pipeline = self.create_background_pipeline(SKY_SHADERS)?;
+        let mesh = self.create_mesh(&sky_box())?;
+        let cube = self.create_cube_texture(faces)?;
+        self.set_environment(cube)?;
+        Ok(Sky {
+            pipeline,
+            mesh,
+            cube,
+        })
     }
 
     /// Whether this GPU can draw in `style` (§ 18: wireframe is optional).

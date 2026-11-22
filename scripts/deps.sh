@@ -51,7 +51,7 @@ else
 fi
 
 # 2. glslc (GLSL -> SPIR-V). Optional: without it the build uses the committed
-#    SPIR-V in scop/shaders/spv/ (option C).
+#    SPIR-V in engine/shaders/spv/ (option C).
 if [ "$1" = "--install-sdk" ] && [ "$OS" = Linux ] && ! has glslc; then
     install_sdk || warn "SDK download failed"
 fi
@@ -60,7 +60,7 @@ if has glslc; then
 elif [ "$OS" = Darwin ] && has brew; then
     echo "  installing glslc with Homebrew ..."
     if brew install shaderc; then ok "glslc installed"; else warn "glslc: brew install shaderc failed"; fi
-elif ls scop/shaders/spv/*.spv >/dev/null 2>&1; then
+elif ls engine/shaders/spv/*.spv >/dev/null 2>&1; then
     warn "glslc not found: the build will use the committed SPIR-V."
     warn "  To get the compiler without admin rights: make sdk"
 else

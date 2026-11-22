@@ -1,5 +1,8 @@
 #version 450
 
+// The engine's default shader (§ 24, moved from scop): grey/picture fade, lighting,
+// chrome and debug colours. Apps can use their own shaders instead (an override).
+
 // § 7: corners come from the vertex buffer, described by the pipeline's
 // vertex input (binding 0: position at location 0, colour at 1, uv at 2).
 // § 10: two more inputs, declared by the engine's shared pipeline layout.
@@ -13,14 +16,14 @@ layout(set = 0, binding = 1) readonly buffer Instances {
 
 layout(set = 0, binding = 0) uniform Camera {
     mat4 view_proj;   // projection × view, once per frame
-    vec4 light;       // § 20: used by mesh.frag (same block there)
-    vec4 eye;         // § 23: used by mesh.frag (chrome)
+    vec4 light;       // § 20: used by default.frag (same block there)
+    vec4 eye;         // § 23: used by default.frag (chrome)
 } camera;
 
-// Sticky note: pushed before each draw. Same block in mesh.frag (§ 15, § 19).
+// Sticky note: pushed before each draw. Same block in default.frag (§ 15, § 19).
 layout(push_constant) uniform Push {
     mat4 model;       // this object's place and turn
-    vec4 params;      // scop's four numbers, used by the fragment shader (§ 19)
+    vec4 params;      // DefaultParams (§ 19, § 24), used by the fragment shader
 } push;
 
 layout(location = 0) in vec3 in_position; // from the vertex buffer (3D since § 10)
@@ -50,7 +53,7 @@ void main() {
     // § 20: normals turn with the model — the model card's turn, without its move
     // (mat3 keeps only the turn part). § 22: the *whole* model, copy included, so each
     // copy's normals turn with it (Q-22.5). Copies are shrunk evenly, never stretched,
-    // so this is still enough; mesh.frag makes the length 1 again.
+    // so this is still enough; default.frag makes the length 1 again.
     normal = mat3(model) * in_normal;
     // § 18: dot size in pixels when drawn as points (ignored for triangles). The GPU
     // clamps it to its range (GpuInfo::point_size_range).

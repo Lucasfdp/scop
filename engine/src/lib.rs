@@ -5,6 +5,8 @@
 
 mod app;
 mod buffer;
+mod camera;
+mod defaults;
 mod depth;
 mod fps;
 mod frames;
@@ -12,26 +14,40 @@ mod gpu;
 mod input;
 mod maths;
 mod mesh;
+mod mesh_builder;
 mod obj;
 mod pipeline;
 mod platform;
 mod shader_inputs;
+mod shader_watch;
+mod sky;
 mod spirv;
 mod swapchain;
 mod texture;
 mod tga;
+mod transform;
 mod triangulate;
+mod tween;
 
 // The whole public API.
 pub use app::{App, Flow, Frame, Gfx, GpuInfo, InstanceRange, MeshId, PipelineId, TextureId};
+pub use camera::{CameraSettings, Framing, OrbitCamera, Up, depth_range};
+pub use defaults::{ColourMode, DEFAULT_SHADERS, DefaultParams, SKY_SHADERS, default_shader_files};
 pub use fps::{FpsCounter, FpsReading};
 pub use input::{Input, Key, MouseButton};
 pub use maths::{Mat4, Vec3, Vec4};
 pub use mesh::{MeshData, Vertex};
+pub use mesh_builder::{
+    LoadError, LoadedObj, UvMapping, box_uv, build_meshes, face_normals, load_obj,
+};
 pub use obj::{ObjError, ObjErrorKind, ObjModel, parse_obj};
 pub use pipeline::{DrawStyle, Shaders};
 pub use platform::{RunError, WindowConfig, run};
+pub use shader_watch::{ShaderWatch, compile_shader};
+pub use sky::{FACE_NAMES, Sky, generate_sky, load_cube_faces, sky_box};
 pub use tga::{Image, TgaError, load_tga};
+pub use transform::Transform;
+pub use tween::{Easing, Tween, smoothstep};
 
 use std::fs;
 use std::io;

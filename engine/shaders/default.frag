@@ -1,6 +1,9 @@
 #version 450
 
-// Noticeboard: the same block as mesh.vert. This shader reads the light (§ 20):
+// The engine's default shader (§ 24, moved from scop): grey/picture fade, lighting,
+// chrome and debug colours. Apps can use their own shaders instead (an override).
+
+// Noticeboard: the same block as default.vert. This shader reads the light (§ 20):
 // xyz = the direction it shines in (length 1), w = strength (0 = off).
 layout(set = 0, binding = 0) uniform Camera {
     mat4 view_proj;
@@ -14,8 +17,8 @@ layout(set = 0, binding = 2) uniform samplerCube environment;
 // § 14: set 1, binding 0 — the picture + its sampler (one set per texture).
 layout(set = 1, binding = 0) uniform sampler2D picture;
 
-// Sticky note: the same block as mesh.vert. The engine passes `params` through
-// untouched; their meaning is scop's (§ 19):
+// Sticky note: the same block as default.vert. The engine passes `params` through
+// untouched; for the default shaders their meaning is `DefaultParams` (§ 19, § 24):
 //   x = blend (0 = grey, 1 = picture, § 15)
 //   y = colour mode (0 normal, 1 facing, 2 depth, 3 chrome § 23)
 //   z, w = the model's nearest and farthest distance from the camera (depth mode)

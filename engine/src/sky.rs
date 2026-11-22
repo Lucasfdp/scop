@@ -1,12 +1,18 @@
-//! The sky (§ 23): a cube map scop makes itself at start — or six `.tga` faces from
-//! `resources/sky/` if they're all there.
+//! The sky (§ 23 — moved into the engine in § 24): a cube map generated from a sun
+//! direction, or six `.tga` faces loaded from a folder; the sky box drawn around the
+//! camera; and `Sky`, the ready-made sky from `Gfx::create_default_sky`.
 //!
 //! Generating it works backwards from the lookup: for every texel of every face, find
 //! the direction the GPU would use to reach it, and colour it by that direction. The
 //! sky then looks right whatever the face conventions, as long as `texel_direction`
 //! matches the GPU's table (`face_for` below is that table, for the tests).
 
-use engine::{Image, Vec3};
+use std::path::Path;
+
+use crate::app::{Frame, MeshId, PipelineId, TextureId};
+use crate::maths::{Mat4, Vec3};
+use crate::mesh::{MeshData, Vertex};
+use crate::tga::{Image, load_tga};
 
 /// Texels per face side. 256² × 6 faces ≈ 1.5 MB: smooth enough for a gradient.
 pub const FACE_SIZE: u32 = 256;
@@ -55,7 +61,7 @@ pub fn sky_colour(direction: Vec3, sun: Vec3) -> [f32; 3] {
 }
 
 /// The six faces of the generated sky, the sun towards `sun`.
-pub fn generate(sun: Vec3) -> [Image; 6] {
+pub fn generate_sky(sun: Vec3) -> [Image; 6] {
     let sun = sun.normalise();
     std::array::from_fn(|face| {
         let mut rgba = Vec::with_capacity((FACE_SIZE * FACE_SIZE * 4) as usize);
@@ -87,6 +93,84 @@ fn srgb_byte(linear: f32) -> u8 {
         1.055 * c.powf(1.0 / 2.4) - 0.055
     };
     (encoded * 255.0).round() as u8
+}
+
+/// Six `.tga` faces from `folder`, named `px nx py ny pz nz` (Vulkan's order).
+/// `Ok(None)` if they aren't all there; an error if one is there but broken.
+pub fn load_cube_faces(folder: &Path) -> Result<Option<[Image; 6]>, String> {
+    let paths = FACE_NAMES.map(|name| folder.join(format!("{name}.tga")));
+    if !paths.iter().all(|p| p.is_file()) {
+        return Ok(None);
+    }
+    let mut faces = Vec::new();
+    for path in &paths {
+        let shown = path.display();
+        let bytes = std::fs::read(path).map_err(|e| format!("{shown}: {e}"))?;
+        faces.push(load_tga(&bytes).map_err(|e| format!("{shown}: {e}"))?);
+    }
+    Ok(faces.try_into().ok())
+}
+
+/// The sky box — a cube from −1 to +1, 6 faces × 2 triangles. Only the corner
+/// positions matter (they're the directions); colour, uv and normal are unused.
+pub fn sky_box() -> MeshData {
+    let mut vertices = Vec::new();
+    for axis in 0..3 {
+        for side in [-1.0_f32, 1.0] {
+            let corner = |a: f32, b: f32| {
+                let mut p = [0.0; 3];
+                p[axis] = side;
+                p[(axis + 1) % 3] = a;
+                p[(axis + 2) % 3] = b;
+                Vertex {
+                    position: p,
+                    colour: [0.0; 3],
+                    uv: [0.0; 2],
+                    normal: [0.0; 3],
+                }
+            };
+            // Two triangles; culling is off, so the winding doesn't matter.
+            for (a, b) in [
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (1.0, 1.0),
+                (-1.0, -1.0),
+                (1.0, 1.0),
+                (-1.0, 1.0),
+            ] {
+                vertices.push(corner(a, b));
+            }
+        }
+    }
+    let indices = (0..vertices.len() as u32).collect();
+    MeshData { vertices, indices }
+}
+
+/// How big the sky box is (half its side), for a view ending at `far`: its corners
+/// (√3 × half away) must stay inside the far plane, or they'd be cut off.
+pub fn sky_half_size(far: f32) -> f32 {
+    far * 0.5
+}
+
+/// A ready-made sky (§ 24): the background pipeline with the default sky shaders, the
+/// box, and the cube map, which `Gfx::create_default_sky` also made the environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sky {
+    /// Public so the app can hot-reload it (`Gfx::replace_pipeline`).
+    pub pipeline: PipelineId,
+    pub mesh: MeshId,
+    pub cube: TextureId,
+}
+
+impl Sky {
+    /// Draws the sky: call it **first** each frame. A box centred on the camera at
+    /// `eye`, big but inside `far`; depth writing off, so everything after goes on top.
+    pub fn draw(&self, frame: &mut Frame, eye: Vec3, far: f32) {
+        let half = sky_half_size(far);
+        let place = Mat4::translation(eye) * Mat4::scale(Vec3::new(half, half, half));
+        // Set 1 needs *a* picture; the sky shaders don't read it (texture 0, white).
+        frame.draw_with(self.pipeline, self.mesh, TextureId(0), place, [0.0; 4]);
+    }
 }
 
 #[cfg(test)]
@@ -154,7 +238,7 @@ mod tests {
 
     #[test]
     fn faces_are_square_and_srgb_encoded() {
-        let faces = generate(Vec3::new(0.0, 1.0, 0.0));
+        let faces = generate_sky(Vec3::new(0.0, 1.0, 0.0));
         for face in &faces {
             assert_eq!((face.width, face.height), (FACE_SIZE, FACE_SIZE));
             assert_eq!(face.rgba.len(), (FACE_SIZE * FACE_SIZE * 4) as usize);
@@ -162,5 +246,35 @@ mod tests {
         assert_eq!(srgb_byte(0.0), 0);
         assert_eq!(srgb_byte(1.0), 255);
         assert_eq!(srgb_byte(0.215_861), 128); // linear ≈ 0.216 is sRGB mid-grey (128)
+    }
+
+    #[test]
+    fn the_sky_box_fits_between_near_and_far() {
+        // A model of radius 1 with the default camera: distance 2, near 0.01, far 22.
+        let (radius, distance) = (1.0, 2.0);
+        let (near, far) = (radius * 0.01, distance + radius * 20.0);
+        let half = sky_half_size(far);
+        assert!(half * 3f32.sqrt() < far, "corners cut off by the far plane");
+        assert!(half > near, "walls closer than the near plane");
+        assert!(half > distance + radius); // holds the whole model, with room to move
+    }
+
+    #[test]
+    fn sky_box_is_a_closed_cube() {
+        let mesh = sky_box();
+        assert_eq!(mesh.vertices.len(), 36); // 6 faces × 2 triangles × 3 corners
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.position.iter().all(|c| c.abs() == 1.0))
+        );
+    }
+
+    #[test]
+    fn missing_faces_mean_no_loaded_sky() {
+        assert!(matches!(
+            load_cube_faces(Path::new("definitely/not/here")),
+            Ok(None)
+        ));
     }
 }

@@ -613,3 +613,135 @@ plano cercano de scop es diminuto (1 % del tamaño del modelo), así que todo el
 de 0.99–1.0: casi el mismo blanco en todas partes. scop usa la **distancia lineal** — la `w` del
 vertex shader — repartida sobre el rango propio del modelo de más cercano a más lejano, así que se
 usa toda la escala de blanco a oscuro.
+
+## Sección 20
+
+**A-20.1** Orbitar mueve solo la cámara: el modelo y la luz se quedan donde están, así que **las
+mismas caras siguen iluminadas** — das la vuelta y ves el lado iluminado y luego el oscuro. Girar el
+modelo mueve sus caras respecto a la luz, así que **cambia qué caras están iluminadas** mientras gira.
+
+**A-20.2** La cámara **se da la vuelta** de golpe en un fotograma al pasar por la vertical: "arriba"
+(+y) y la dirección de la vista se convierten en la misma línea, así que deja de estar definido cuál
+es arriba, y al otro lado sale invertido. El límite (±89°) la para justo antes.
+
+**A-20.3** La luz parece **pintada**: las caras que estaban brillantes siguen brillantes y las oscuras
+siguen oscuras, gire como gire el modelo — el shader sigue creyendo que cada cara apunta adonde
+apuntaba al principio.
+
+**A-20.4** Las caras de espaldas a la luz recibirían **cero** — negro puro, invisibles contra el fondo
+oscuro, y el contorno del modelo desaparecería por su lado oscuro. El ambiente mantiene cada cara al
+menos tenuemente visible.
+
+**A-20.5** Una esquina guarda **una** normal. Con esquinas propias, las esquinas de cada triángulo
+llevan la normal de su cara, así que toda la cara tiene un brillo y las aristas siguen nítidas. Las
+esquinas compartidas pertenecen a varias caras a la vez, así que necesitarían una normal
+**promediada** — el brillo se mezclaría a través de las aristas: **smooth shading**, aspecto
+redondeado, incorrecto para las esquinas marcadas del logo.
+
+## Sección 21
+
+**A-21.1** Vulkan solo acepta **SPIR-V** (§ 6), nunca texto GLSL. Algo tiene que traducir antes el
+`.frag` a SPIR-V — al compilar es `build.rs`; para la recarga en caliente es el mismo `glslc`,
+ejecutado con scop en marcha.
+
+**A-21.2** Para que un fallo no cueste nada: si el shader nuevo no compila o no se puede construir el
+pipeline, **los pipelines viejos siguen ahí** y scop sigue dibujando con ellos. Destruir primero
+dejaría a scop sin nada con lo que dibujar (la misma regla que al soltar un modelo en § 19).
+
+**A-21.3** **Pantalla: sin cambios** — los shaders viejos siguen funcionando. **Terminal: el error de
+`glslc`**, con el archivo y la línea del problema. Arreglar y guardar → la siguiente comprobación ve
+una fecha de modificación más nueva, compila, cambia el pipeline e imprime "shaders reloaded".
+
+**A-21.4** Rompe el **contrato del shader**: el shader ahora espera una entrada de vértice en la
+location 4, pero la disposición de vértice del lado de Rust (§ 7) no tiene nada ahí — la validación
+informa de la entrada que falta (sin validación, los valores son indefinidos). La recarga en caliente
+no puede añadir datos que el lado de Rust no envía: hace falta un campo `tangent` en `Vertex`, un 5º
+atributo, que scop rellene los datos — y recompilar y reiniciar.
+
+**A-21.5** Un id de pipeline significa "el pipeline sólido (wireframe, puntos) de scop", no "esta
+versión exacta": scop *quiere* que todos los draws siguientes usen el nuevo, sin actualizar sus
+resguardos. Nada puede dibujar el viejo por error — se destruye solo cuando la GPU ha terminado con
+él, y nadie guarda un id aparte para él. En § 19 no se podía reutilizar el hueco porque podría
+aparecer una mesh *distinta* bajo un id viejo: forma equivocada, sin error. Aquí es la misma cosa,
+actualizada.
+
+## Sección 22
+
+**A-22.1** Ahorra la **repetición**: grabar 512 juegos de comandos bind / push / draw en la CPU, y el
+coste de arranque de la GPU para 512 draws — es un comando que dice "512 copias". **No** ahorra el
+dibujo: la GPU sigue ejecutando el vertex shader para cada esquina de cada copia y rellenando cada
+triángulo (512 × la mesh).
+
+**A-22.2** **Demasiado grande para el bloque de push**: cabe más o menos una matriz (128 bytes
+garantizados), y 512 matrices son 32 KB — un buffer que el shader lee como un array. **Uno por slot de
+fotograma** porque la CPU reescribe la lista cada fotograma mientras puede que la GPU aún esté leyendo
+la del fotograma anterior (§ 10): una lista compartida haría que las copias saltaran o parpadearan, en
+silencio.
+
+**A-22.3** Se dibuja con la **matriz de la primera copia de la multitud** en vez de la identidad:
+reducido al tamaño de una copia, movido a una esquina de la cuadrícula y girando por su cuenta —
+porque los draws normales leen la posición 0, y la posición 0 ya no es "no cambiar nada".
+
+**A-22.4** No. El **techo de vsync** (§ 19): FIFO espera a la pantalla, así que el título no puede
+mostrar más de 60 tanto si el fotograma costó 2 ms como 15 ms de trabajo real. La GPU está dibujando
+512 × los triángulos de la tetera; para ver el coste, compara frame times sin el techo, o fíjate en si
+el número baja *de* 60.
+
+**A-22.5** El vertex shader gira cada normal con el modelo **completo** de esa copia — pósit × la
+matriz propia de la copia — la misma tarjeta combinada que coloca sus esquinas. Así que las normales
+de cada copia giran con ella, y el código de la luz sin cambios (§ 20) ve la dirección correcta para
+cada cara de cada copia.
+
+## Sección 23
+
+**A-23.1** Seis imágenes cuadradas — las caras interiores de una caja — guardadas como una textura. Se
+consulta con una **dirección** porque describe lo que hay *alrededor* de un punto, no a lo largo de una
+superficie plana: la dirección dice "¿qué hay por ahí?", y la GPU elige la cara a la que apunta y el
+punto dentro de ella. Toda dirección tiene respuesta, así que cubre todo el entorno.
+
+**A-23.2** Se comportaría como una habitación, no como un cielo: al moverse la cámara en su órbita se
+acercaría a una pared y se alejaría de otra, las paredes pasarían a velocidades distintas, y podrías
+ver los **bordes y las esquinas** de la caja. Moviéndose con la cámara, solo girar cambia la vista —
+como algo infinitamente lejano.
+
+**A-23.3** **Solo el cielo.** Dibujada primero con la escritura de profundidad activada, la caja
+escribe su profundidad (muy cercana) en toda la pantalla; el modelo está más lejos, así que falla el
+test de profundidad (§ 11) en todas partes y nunca se dibuja. Con la escritura de profundidad
+desactivada, la caja pinta el fondo pero deja la imagen de profundidad en "aquí no hay nada", así que
+el modelo pasa el test y se dibuja encima — sea cual sea el tamaño de la caja.
+
+**A-23.4** Cada cara es **plana** con una normal (flat shading, § 20), así que cada una actúa como su
+propio espejo plano. Las caras vecinas apuntan en direcciones distintas, así que en su arista común la
+dirección del rebote salta — el reflejo se rompe de golpe. Los cientos de caritas planas de la tetera
+se convierten en cientos de espejitos: una bola de discoteca. Con normales suaves (promediadas) el
+cromado sería suave.
+
+**A-23.5** Para que todo cuente la misma historia: el lado brillante del modelo (luz de § 20) mira al
+sol que ves en el cielo y en sus reflejos. Con el sol en otro sitio, el modelo estaría iluminado desde
+un lado mientras el sol del cielo está en otro — parece falso enseguida, aunque no sepas decir por qué.
+
+## Sección 24
+
+**A-24.1** **scop.** Otro proyecto no querría caras grises sin cambios — existen porque el subject pide
+grises distinguibles: una decisión, no un mecanismo. Lo que va al engine es el *mecanismo*: construir
+una mesh por objeto con sus propias esquinas y normales planas, pidiendo el color mediante un
+**callback** — el callback de scop devuelve sus grises.
+
+**A-24.2** Porque la vuelta de la cámara sale de las propias matemáticas de cámara del engine (`look_at`
+con un "arriba" fijo): es una propiedad de la cámara del engine, no de una app. Si cada app tuviera que
+acordarse del límite, alguna lo olvidaría y la cámara se daría la vuelta al pasar por encima. El engine
+es dueño de la protección (como un ajuste con un valor por defecto seguro).
+
+**A-24.3** Escribe tus propios shaders (un **override**), crea un pipeline con ellos y dibuja con
+`draw_with`, cuyos cuatro números significan lo que digan tus shaders. Reutilizar el pipeline por
+defecto metería tus números en shaders que los leen como blend / modo de color / rango de profundidad
+— colores equivocados, en silencio. Cada pipeline es dueño del significado de sus push params.
+
+**A-24.4** Solo la app sabe cuáles de sus pipelines se construyeron con qué shaders, y en qué estilo
+(relleno, wireframe, puntos, fondo). El engine solo ve pipelines y bytes. La mitad general — notar un
+guardado y compilar — es igual para todo proyecto, así que se mueve; la correspondencia se queda con la
+app.
+
+**A-24.5** El "arriba" de la cámara está fijado como +y: en un mundo con +z arriba, orbitar sube por el
+lado equivocado, el horizonte se inclina, y el límite de pitch protege el eje equivocado. El **eje de
+arriba** (y el límite respecto a él) debería ser un ajuste, con +y por defecto para que scop no cambie.

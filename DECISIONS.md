@@ -362,3 +362,21 @@ camera block, set 0 per frame, hot reload, the § 20 light).
 **Cost accepted:** 1.5 MB of sky texture; a short wait when the environment is set; the
 model never reflects itself.
 **Revisit if:** HDR skies (float formats, a loader), or smooth chrome (averaged normals).
+
+## 2026-11-22 — § 24: bonus features moved into the engine
+**Chose:** everything that passes the reuse test moved, with scop's values as defaults:
+`camera.rs` (`OrbitCamera`, `CameraSettings` incl. the **up axis**, `Framing`,
+`depth_range`), `transform.rs` (`Transform`), `tween.rs` (`Tween`, `Easing`,
+`smoothstep`), `mesh_builder.rs` (`build_meshes` / `load_obj` with `UvMapping` and a
+**colour callback**), `shader_watch.rs` (`ShaderWatch` over any file list), `sky.rs`
+(`generate_sky`, `load_cube_faces`, `sky_box`, `Sky`), `defaults.rs` (the **default
+shaders**, now in `engine/shaders/` compiled by `engine/build.rs`; `DefaultParams`,
+`ColourMode`, `default_shader_files`); `Gfx::create_default_pipeline`,
+`Gfx::create_default_sky`. scop keeps keys, `face_grey` (its callback), picture rotation,
+the crowd layout, the light direction, the title, `main()`; no shader files of its own.
+**Rejected:** copying scop's assumptions (+y up, fixed limits); greys in the engine;
+engine-driven pipeline rebuilds on reload (only the app knows which pipelines use which
+files); a crowd/grid helper (owner, 2026-11-21).
+**Why:** owner's request: every reusable bonus feature in the engine, like § 8.
+**Cost accepted:** a bigger public API; `DefaultParams` fixes the default shaders' push
+contract (overrides keep raw `draw_with`).

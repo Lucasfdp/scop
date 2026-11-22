@@ -32,7 +32,7 @@ make
 One line: checks for Rust, the shader compiler (`glslc`) and Vulkan, installs what it can
 without admin rights (Rust via rustup; on macOS `glslc` and MoltenVK via Homebrew), then
 builds in release mode. If `glslc` isn't available, the build uses the pre-compiled
-shaders committed in `scop/shaders/spv/`; `make sdk` downloads the compiler into your
+shaders committed in `engine/shaders/spv/`; `make sdk` downloads the compiler into your
 home folder if you want it.
 
 ### Run
@@ -114,9 +114,10 @@ takes the next picture in turn. Pictures must be 24- or 32-bit TGA
 - Cube-map sky (E), generated at start with the sun where the light comes from (or six
   `.tga` faces from `resources/sky/`: `px nx py ny pz nz`), and a chrome mode (C) that
   reflects it.
-- Shader hot reload: save `scop/shaders/mesh.vert` or `mesh.frag` while scop runs and the
-  change appears without restarting; a broken shader prints `glslc`'s error and the old one
-  keeps running. Needs `glslc` and the repo's `scop/shaders/` folder; otherwise it switches off.
+- Shader hot reload: save one of the engine's default shaders (`engine/shaders/default.vert`,
+  `default.frag`, `sky.vert`, `sky.frag`) while scop runs and the change appears without
+  restarting; a broken shader prints `glslc`'s error and the old one keeps running. Needs
+  `glslc` and the repo's `engine/shaders/` folder; otherwise it switches off.
   (Run `make spv` afterwards to refresh the committed fallback.)
 - Depth buffer, window resizing, validation-layer-clean in debug builds.
 - Every real decision — what was chosen, what was rejected and why — is in

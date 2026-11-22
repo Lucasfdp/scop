@@ -1,6 +1,7 @@
-//! Build script: compiles every shader in `shaders/` to SPIR-V with `glslc`,
-//! before scop itself is compiled. Output goes to Cargo's `OUT_DIR`, where
-//! `main.rs` embeds it with `include_bytes!`.
+//! Build script: compiles every shader in `shaders/` — the engine's **default
+//! shaders** (§ 24, moved from scop) — to SPIR-V with `glslc`, before the engine itself
+//! is compiled. Output goes to Cargo's `OUT_DIR`, where `defaults.rs` embeds it with
+//! `include_bytes!`.
 //!
 //! § 16, option C: compiled copies are also committed in `shaders/spv/`.
 //! - `glslc` found  → compile; warn if the committed copy is missing or stale
@@ -19,7 +20,7 @@ fn main() {
     println!("cargo:rerun-if-changed=shaders");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo always sets OUT_DIR"));
-    let entries = fs::read_dir("shaders").expect("scop/shaders/ should exist");
+    let entries = fs::read_dir("shaders").expect("engine/shaders/ should exist");
 
     for entry in entries {
         let path = entry.expect("readable directory entry").path();

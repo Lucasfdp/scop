@@ -2,7 +2,7 @@
 section: 19
 slug: bonus-quality-of-life
 tier: T1
-status: in-progress
+status: done
 prereqs: [16, 18]
 terms: [frames per second, frame time, vsync cap, averaging window, title throttling, dropped file, runtime mesh replacement, stale handle, debug view, gl_FrontFacing, winding order, inside-out face, linear depth, push params]
 ---

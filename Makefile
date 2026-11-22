@@ -7,7 +7,7 @@
 #                     (not TEX: that's one of make's own built-in variables, set to "tex")
 #   make deps         check for (and where possible install) Rust, glslc, Vulkan
 #   make sdk          download the LunarG Vulkan SDK (glslc) into your home folder — no admin
-#   make spv          refresh the committed SPIR-V fallback in scop/shaders/spv/
+#   make spv          refresh the committed SPIR-V fallback in engine/shaders/spv/
 #   make test         unit tests
 #   make clean / fclean / re
 
@@ -20,7 +20,7 @@ SDK_DIR := $(HOME)/.local/vulkan-sdk
 SDK_BIN := $(firstword $(wildcard $(SDK_DIR)/*/x86_64/bin))
 export PATH := $(HOME)/.cargo/bin:$(if $(SDK_BIN),$(SDK_BIN):)$(PATH)
 
-SHADERS := $(wildcard scop/shaders/*.vert scop/shaders/*.frag)
+SHADERS := $(wildcard engine/shaders/*.vert engine/shaders/*.frag)
 
 all: deps build
 
@@ -41,9 +41,9 @@ sdk:
 
 spv:
 	@command -v glslc >/dev/null || { echo "glslc not found: run 'make deps' (or 'make sdk')"; exit 1; }
-	@mkdir -p scop/shaders/spv
+	@mkdir -p engine/shaders/spv
 	@for s in $(SHADERS); do \
-		glslc "$$s" -o "scop/shaders/spv/$$(basename $$s).spv" && echo "compiled $$s"; \
+		glslc "$$s" -o "engine/shaders/spv/$$(basename $$s).spv" && echo "compiled $$s"; \
 	done
 
 clean:
