@@ -123,8 +123,8 @@ una matriz de modelo) y la **iluminación**. Eso queda a propósito para ft_newt
 | 21 | `21-bonus-shader-hot-reload.md` | Shaders que se recargan en marcha | T1 | hecho | Editar un shader y ver el cambio sin reiniciar |
 | 22 | `22-bonus-instancing.md` | Cientos de copias en un solo draw | T2 | hecho | Cientos de logos girando con una mesh y un draw |
 | 23 | `23-bonus-skybox.md` | Un cielo alrededor de la escena | T1 | hecho | Skybox con cube map, más un modo cromado (reflectante) |
-| 24 | `24-engine-consolidation.md` | Llevar las funciones del bonus al engine | T1 | en curso | El mismo scop, engine reutilizable: cámara, transformaciones, tween, constructor de meshes, recarga en caliente, cielo, shaders por defecto |
-| 25 | `25-dynamic-reflections.md` | Reflejos en vivo (renderizar a un cube map) | T1 | sin empezar | El cromado refleja lo que tenga alrededor |
+| 24 | `24-engine-consolidation.md` | Llevar las funciones del bonus al engine | T1 | hecho | El mismo scop, engine reutilizable: cámara, transformaciones, tween, constructor de meshes, recarga en caliente, cielo, shaders por defecto |
+| 25 | `25-dynamic-reflections.md` | Reflejos en vivo (renderizar a un cube map) | T1 | hecho | El cromado refleja lo que tenga alrededor |
 
 Las secciones 3–19 se escriben cuando llegues a ellas, para que el plan se adapte a lo
 que resulte difícil.

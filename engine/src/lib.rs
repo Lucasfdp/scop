@@ -16,8 +16,10 @@ mod maths;
 mod mesh;
 mod mesh_builder;
 mod obj;
+mod overlay;
 mod pipeline;
 mod platform;
+mod probe;
 mod shader_inputs;
 mod shader_watch;
 mod sky;
@@ -41,6 +43,7 @@ pub use mesh_builder::{
     LoadError, LoadedObj, UvMapping, box_uv, build_meshes, face_normals, load_obj,
 };
 pub use obj::{ObjError, ObjErrorKind, ObjModel, parse_obj};
+pub use overlay::{GLYPH_HEIGHT, GLYPH_WIDTH, text_size};
 pub use pipeline::{DrawStyle, Shaders};
 pub use platform::{RunError, WindowConfig, run};
 pub use shader_watch::{ShaderWatch, compile_shader};

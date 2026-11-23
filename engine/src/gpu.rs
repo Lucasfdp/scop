@@ -14,17 +14,20 @@ use std::fmt;
 use ash::{Device, Entry, Instance, ext, khr, vk};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 
-use crate::app::{Frame, GpuInfo, MeshId, PipelineId};
+use crate::app::{Frame, GpuInfo, MeshId, Overlay, PipelineId, TextureId};
 use crate::buffer::Uploader;
+use crate::defaults::TEXT_SHADERS;
 use crate::depth::DepthImage;
-use crate::frames::{self, Draw, DrawList, FRAMES_IN_FLIGHT, FrameTarget, Frames};
-use crate::mesh::{Mesh, MeshData};
+use crate::frames::{self, Draw, DrawList, FRAMES_IN_FLIGHT, FrameTarget, Frames, ProbePass};
+use crate::mesh::{Mesh, MeshData, Vertex};
+use crate::overlay;
 use crate::pipeline::{DrawStyle, Pipeline, Shaders};
-use crate::shader_inputs::{INSTANCE_CAPACITY, ShaderInputs, push_bytes};
+use crate::probe::{PROBE_SIZE, ReflectionProbe, face_cameras};
+use crate::shader_inputs::{INSTANCE_CAPACITY, MAIN_VIEW, ShaderInputs, push_bytes};
 use crate::spirv::SpirvError;
 use crate::swapchain::Swapchain;
 use crate::texture::{Textures, WHITE_CUBE};
-use crate::tga::Image;
+use crate::tga::{Image, load_tga};
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
@@ -122,6 +125,14 @@ pub(crate) struct GpuContext {
     /// `None` = destroyed (§ 19). Slots are never reused, so an old `MeshId` can
     /// only ever fail, never draw a different mesh.
     meshes: Vec<Option<Mesh>>,
+    /// § 25: the reflection probe (one, reused every frame that asks for it).
+    probe: ReflectionProbe,
+    /// § 23/25: the fixed environment (view, sampler), to go back to.
+    environment: (vk::ImageView, vk::Sampler),
+    /// § 25: per frame slot, whether its main view's binding 2 is the probe's cube.
+    main_reads_probe: [bool; FRAMES_IN_FLIGHT],
+    /// § 25 extra: the text kit (`None` only while being built).
+    overlay: Option<Overlay>,
 }
 
 /// What happened when a frame was drawn.
@@ -297,12 +308,33 @@ impl GpuContext {
         })?;
         // § 23: until the app sets one, the environment is the white cube. Written
         // before the first frame, so nothing is using the sets yet.
-        if let Some((view, sampler)) = textures.cube(WHITE_CUBE) {
-            // SAFETY: no frame has been submitted.
-            unsafe { inputs.set_environment(&device, view, sampler) };
-        }
+        let environment = textures
+            .cube(WHITE_CUBE)
+            .expect("texture 1 is always the white cube");
+        // SAFETY: no frame has been submitted.
+        unsafe { inputs.set_environment(&device, environment.0, environment.1) };
+        // § 25: the reflection probe, same colour format as the screen.
+        let probe = ReflectionProbe::new(
+            &instance,
+            physical_device,
+            &device,
+            &memory_types,
+            swapchain.format.format,
+        )
+        .map_err(|e| {
+            // SAFETY: as above — nothing submitted, each destroyed once.
+            unsafe {
+                textures.destroy(&device);
+                depth.destroy(&device);
+                inputs.destroy(&device);
+                frames.destroy(&device);
+                swapchain.destroy(&device, &swapchain_loader);
+                device.destroy_device(None);
+            }
+            fail(e)
+        })?;
 
-        Ok(GpuContext {
+        let mut gpu = GpuContext {
             _entry: entry,
             instance,
             debug,
@@ -324,7 +356,51 @@ impl GpuContext {
             textures,
             pipelines: Vec::new(),
             meshes: Vec::new(),
+            probe,
+            environment,
+            main_reads_probe: [false; FRAMES_IN_FLIGHT],
+            overlay: None,
+        };
+        // From here `gpu` is whole: on error its `Drop` cleans up everything.
+        gpu.overlay = Some(gpu.create_overlay()?);
+        Ok(gpu)
+    }
+
+    /// § 25 extra: the text pipeline (a background one: tests depth, never writes
+    /// it), a unit quad (corners 0..1) and the font, as a texture.
+    fn create_overlay(&mut self) -> Result<Overlay, GpuError> {
+        let font = load_tga(overlay::FONT_TGA)
+            .map_err(|_| GpuError::Unsupported("the built-in font is unreadable"))?;
+        let corner = |x: f32, y: f32| Vertex {
+            position: [x, y, 0.0],
+            colour: [1.0; 3],
+            uv: [x, y],
+            normal: [0.0, 0.0, -1.0],
+        };
+        let quad = MeshData {
+            vertices: vec![
+                corner(0.0, 0.0),
+                corner(1.0, 0.0),
+                corner(1.0, 1.0),
+                corner(0.0, 1.0),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        Ok(Overlay {
+            pipeline: self.create_background_pipeline(TEXT_SHADERS)?,
+            quad: self.create_mesh(&quad)?,
+            font: TextureId(self.create_texture(&font)?),
         })
+    }
+
+    /// § 25: the engine's text kit and the image's size, for `Frame`.
+    pub(crate) fn overlay(&self) -> Option<Overlay> {
+        self.overlay
+    }
+
+    pub(crate) fn size(&self) -> (f32, f32) {
+        let e = self.swapchain.extent;
+        (e.width as f32, e.height as f32)
     }
 
     /// Whether this device can draw in `style` (§ 18). Fill and points always;
@@ -480,6 +556,9 @@ impl GpuContext {
             self.device.device_wait_idle()?;
             self.inputs.set_environment(&self.device, view, sampler);
         }
+        // § 25: every set now reads the fixed one (the main views included).
+        self.environment = (view, sampler);
+        self.main_reads_probe = [false; FRAMES_IN_FLIGHT];
         Ok(())
     }
 
@@ -551,9 +630,10 @@ impl GpuContext {
         let mut list = DrawList {
             clear_colour: frame.clear_colour,
             layout: self.inputs.pipeline_layout,
-            camera_set: self.inputs.camera_set(slot_index),
+            camera_set: self.inputs.camera_set(slot_index, MAIN_VIEW),
             draws: Vec::with_capacity(frame.draws.len()),
         };
+        let mut in_reflections = Vec::with_capacity(frame.draws.len());
         for call in &frame.draws {
             match (
                 self.pipelines.get(call.pipeline.0),
@@ -569,7 +649,26 @@ impl GpuContext {
                 }),
                 _ => return Err(GpuError::UnknownHandle),
             }
+            in_reflections.push(call.in_reflections);
         }
+        // § 25: the probe's draws = the same list minus the excluded ones.
+        let probe = frame.probe.map(|_| ProbePass {
+            image: self.probe.image,
+            face_views: self.probe.face_views,
+            extent: vk::Extent2D {
+                width: PROBE_SIZE,
+                height: PROBE_SIZE,
+            },
+            depth: &self.probe.depth,
+            sets: std::array::from_fn(|face| self.inputs.camera_set(slot_index, face + 1)),
+            draws: list
+                .draws
+                .iter()
+                .zip(&in_reflections)
+                .filter(|&(_, &keep)| keep)
+                .map(|(draw, _)| *draw)
+                .collect(),
+        });
 
         let slot = self.frames.current();
 
@@ -581,8 +680,38 @@ impl GpuContext {
 
             // 1b. Only now is this slot's camera buffer free: the GPU has finished the
             //     last frame that read it (Q-10.2). Write this frame's camera.
-            self.inputs
-                .write_camera(slot_index, frame.camera, frame.light, frame.eye);
+            self.inputs.write_camera(
+                (slot_index, MAIN_VIEW),
+                frame.camera,
+                frame.light,
+                frame.eye,
+            );
+            // § 25: the probe's six face cameras (same light; the "eye" is the probe).
+            if let Some((position, near, far)) = frame.probe {
+                let eye = [position.x, position.y, position.z, 1.0];
+                for (face, camera) in face_cameras(position, near, far).into_iter().enumerate() {
+                    self.inputs
+                        .write_camera((slot_index, face + 1), camera, frame.light, eye);
+                }
+            }
+            // § 25: the main view reads the probe's cube while a probe is captured,
+            // the fixed environment otherwise. Safe to rewrite: this slot's last frame
+            // is finished (the fence), and only the main view's set changes.
+            let wants_probe = frame.probe.is_some();
+            if wants_probe != self.main_reads_probe[slot_index] {
+                let (view, sampler) = if wants_probe {
+                    (self.probe.cube_view, self.textures.sampler())
+                } else {
+                    self.environment
+                };
+                self.inputs.set_view_environment(
+                    &self.device,
+                    (slot_index, MAIN_VIEW),
+                    view,
+                    sampler,
+                );
+                self.main_reads_probe[slot_index] = wants_probe;
+            }
             // § 22: and this frame's instance list (position 0 stays the identity).
             self.inputs.write_instances(slot_index, &frame.instances);
 
@@ -617,6 +746,7 @@ impl GpuContext {
                 slot.command_buffer,
                 &target,
                 &list,
+                probe.as_ref(),
             )?;
 
             // 5. Hand it over: wait for `image_free` before the first write to the
@@ -704,6 +834,7 @@ impl Drop for GpuContext {
             for pipeline in &self.pipelines {
                 pipeline.destroy(&self.device);
             }
+            self.probe.destroy(&self.device);
             // Before `inputs`: the texture sets were made with its set-1 layout.
             self.textures.destroy(&self.device);
             // After the pipelines: they were built with its layout.

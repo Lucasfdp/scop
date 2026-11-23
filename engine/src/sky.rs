@@ -168,8 +168,9 @@ impl Sky {
     pub fn draw(&self, frame: &mut Frame, eye: Vec3, far: f32) {
         let half = sky_half_size(far);
         let place = Mat4::translation(eye) * Mat4::scale(Vec3::new(half, half, half));
-        // Set 1 needs *a* picture; the sky shaders don't read it (texture 0, white).
-        frame.draw_with(self.pipeline, self.mesh, TextureId(0), place, [0.0; 4]);
+        // § 25: the sky's own cube as its picture (set 1) — never the environment,
+        // which may be the probe's live capture.
+        frame.draw_with(self.pipeline, self.mesh, self.cube, place, [0.0; 4]);
     }
 }
 

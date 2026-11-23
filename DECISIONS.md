@@ -380,3 +380,30 @@ files); a crowd/grid helper (owner, 2026-11-21).
 **Why:** owner's request: every reusable bonus feature in the engine, like § 8.
 **Cost accepted:** a bigger public API; `DefaultParams` fixes the default shaders' push
 contract (overrides keep raw `draw_with`).
+
+## 2026-11-23 — § 25: live reflections (reflection probe) + on-screen controls
+**Chose:** one `ReflectionProbe` in the engine: a 256² cube render target (6 layers,
+colour attachment + sampled, the swapchain's format so every pipeline draws into it), six
+per-face 2D views, one cube view, its own depth image. Asked per frame by the app
+(`Frame::set_reflection_probe`); draws made while `set_reflective(true)` are left out of
+it. Seven camera views per frame slot (main + 6 faces), sharing the slot's instance
+list. Six passes before the main pass, hand-over barriers in and out; the main view's
+environment is switched to the probe's cube only on frames that capture one. scop: chrome
++ M (live, the default ↔ fixed sky); the model excludes itself.
+Text: X11 misc-fixed 8×13 (public domain) baked into a TGA atlas; `Frame::draw_text` /
+`draw_panel` as instanced unit quads (each instance's matrix carries rectangle, font cell,
+colour), `texelFetch` + discard, a background pipeline at depth 0, never in reflections.
+scop shows the controls top-left, H toggles, scale grows with window height.
+**Rejected:** one probe per object or per copy (cost × N); a probe per frame slot (one image
+is enough with the barriers; same as the shared depth image); a font library or a TTF
+rasteriser (not allowed / overkill); alpha blending for text (discard is enough for 1-bit
+glyphs).
+**Why:** owner wanted chrome to reflect what's really around it (§ 23 follow-up) and the
+controls on screen (no learning section).
+**Cost accepted:** the scene drawn 7× when live chrome is on; reflections centred on the
+model (parallax off for big objects); ASCII-only text.
+**Revisit if:** several reflective objects, or text with accents (a bigger atlas).
+**Fix (2026-11-23):** the sky read the environment (set 0, binding 2), so with live
+chrome it painted the probe's capture round the camera (the props appeared twice). The
+sky now reads its own cube through set 1 (`Sky::draw` passes `self.cube`); only chrome
+reads the environment.

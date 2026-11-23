@@ -79,11 +79,20 @@ pub(crate) fn mat4_bytes(m: Mat4) -> [u8; MAT4_SIZE] {
 struct CameraSlot {
     buffer: Buffer,
     mapped: *mut u8,
-    /// § 22: this slot's instance list (a storage buffer), persistently mapped.
-    instances: Buffer,
+    /// § 22: this slot's instance list (a storage buffer), persistently mapped. Owned
+    /// by the slot's main view (`Some`); the other views (§ 25) point at the same one.
+    instances: Option<Buffer>,
+    instances_handle: vk::Buffer,
     instances_mapped: *mut u8,
     set: vk::DescriptorSet,
 }
+
+/// § 25: views per frame slot — the main camera, then the six probe faces. Each has
+/// its own camera buffer and set 0, so each face can have its own camera and the
+/// faces can read a different environment from the main view.
+pub(crate) const VIEWS: usize = 7;
+/// Which view is the main one (the screen); the probe faces are 1..=6.
+pub(crate) const MAIN_VIEW: usize = 0;
 
 pub(crate) struct ShaderInputs {
     /// The shared "function signature" for every pipeline's extra inputs.
@@ -138,16 +147,17 @@ impl ShaderInputs {
             .offset(0)
             .size(PUSH_SIZE as u32)];
         // Room for one set per slot, each holding one uniform-buffer descriptor.
+        let sets = (slot_count * VIEWS) as u32; // § 25: one set per view per slot
         let pool_sizes = [
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(slot_count as u32),
+                .descriptor_count(sets),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::STORAGE_BUFFER)
-                .descriptor_count(slot_count as u32),
+                .descriptor_count(sets),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(slot_count as u32),
+                .descriptor_count(sets),
         ];
 
         // SAFETY: plain creation on a live device. Until `inputs` exists, each failure
@@ -184,7 +194,7 @@ impl ShaderInputs {
             };
             let pool = match device.create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo::default()
-                    .max_sets(slot_count as u32)
+                    .max_sets(sets)
                     .pool_sizes(&pool_sizes),
                 None,
             ) {
@@ -202,15 +212,23 @@ impl ShaderInputs {
                 set_layout,
                 texture_set_layout,
                 pool,
-                cameras: Vec::with_capacity(slot_count),
+                cameras: Vec::with_capacity(slot_count * VIEWS),
             };
             for _ in 0..slot_count {
-                match inputs.create_camera(device, memory_types) {
-                    Ok(camera) => inputs.cameras.push(camera),
-                    Err(e) => {
-                        // Nothing has been submitted yet, so nothing is in use.
-                        inputs.destroy(device);
-                        return Err(e);
+                // The main view creates the slot's instance list; the six probe views
+                // share it (§ 25).
+                let mut shared = None;
+                for _ in 0..VIEWS {
+                    match inputs.create_camera(device, memory_types, shared) {
+                        Ok(camera) => {
+                            shared = Some((camera.instances_handle, camera.instances_mapped));
+                            inputs.cameras.push(camera);
+                        }
+                        Err(e) => {
+                            // Nothing has been submitted yet, so nothing is in use.
+                            inputs.destroy(device);
+                            return Err(e);
+                        }
                     }
                 }
             }
@@ -220,10 +238,12 @@ impl ShaderInputs {
 
     /// One slot: a persistently mapped uniform buffer, and a descriptor set
     /// written once to point at it.
+    /// `shared` = the slot's instance list, when it already exists (views 1..=6).
     fn create_camera(
         &self,
         device: &Device,
         memory_types: &vk::PhysicalDeviceMemoryProperties,
+        shared: Option<(vk::Buffer, *mut u8)>,
     ) -> Result<CameraSlot, GpuError> {
         // Per-frame data: written by the CPU every frame, so HOST_VISIBLE (no staging),
         // and HOST_COHERENT (writes reach the GPU without a flush).
@@ -235,19 +255,23 @@ impl ShaderInputs {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
         // § 22: the instance list — also rewritten every frame, so also no staging.
-        let instances = match Buffer::new(
-            device,
-            memory_types,
-            INSTANCE_BYTES as vk::DeviceSize,
-            vk::BufferUsageFlags::STORAGE_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                // SAFETY: just created, never used by the GPU.
-                unsafe { buffer.destroy(device) };
-                return Err(e);
-            }
+        // Only the main view makes one; the probe views share it.
+        let instances = match shared {
+            Some(_) => None,
+            None => match Buffer::new(
+                device,
+                memory_types,
+                INSTANCE_BYTES as vk::DeviceSize,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ) {
+                Ok(b) => Some(b),
+                Err(e) => {
+                    // SAFETY: just created, never used by the GPU.
+                    unsafe { buffer.destroy(device) };
+                    return Err(e);
+                }
+            },
         };
         let set_layouts = [self.set_layout];
         let alloc = vk::DescriptorSetAllocateInfo::default()
@@ -257,17 +281,24 @@ impl ShaderInputs {
         // SAFETY: the memory is HOST_VISIBLE and mapped only here; the set comes from
         // our pool (freed with it); the buffer outlives the set (both go in `destroy`).
         unsafe {
-            let setup = || -> Result<(*mut u8, *mut u8, vk::DescriptorSet), GpuError> {
-                let mapped = buffer.map(device)?;
-                let instances_mapped = instances.map(device)?;
-                let set = device.allocate_descriptor_sets(&alloc)?[0];
-                Ok((mapped, instances_mapped, set))
-            };
-            let (mapped, instances_mapped, set) = match setup() {
+            let setup =
+                || -> Result<(*mut u8, (vk::Buffer, *mut u8), vk::DescriptorSet), GpuError> {
+                    let mapped = buffer.map(device)?;
+                    let list = match (&instances, shared) {
+                        (Some(own), _) => (own.handle, own.map(device)?),
+                        (None, Some(shared)) => shared,
+                        (None, None) => unreachable!("a view either owns or shares the list"),
+                    };
+                    let set = device.allocate_descriptor_sets(&alloc)?[0];
+                    Ok((mapped, list, set))
+                };
+            let (mapped, (instances_handle, instances_mapped), set) = match setup() {
                 Ok(s) => s,
                 Err(e) => {
                     buffer.destroy(device);
-                    instances.destroy(device);
+                    if let Some(own) = &instances {
+                        own.destroy(device);
+                    }
                     return Err(e);
                 }
             };
@@ -285,7 +316,7 @@ impl ShaderInputs {
                 .buffer_info(&buffer_info);
             // § 22: binding 1 = the instance list, the whole buffer.
             let instances_info = [vk::DescriptorBufferInfo::default()
-                .buffer(instances.handle)
+                .buffer(instances_handle)
                 .offset(0)
                 .range(INSTANCE_BYTES as vk::DeviceSize)];
             let instances_write = vk::WriteDescriptorSet::default()
@@ -299,6 +330,7 @@ impl ShaderInputs {
                 buffer,
                 mapped,
                 instances,
+                instances_handle,
                 instances_mapped,
                 set,
             };
@@ -317,20 +349,47 @@ impl ShaderInputs {
         }
     }
 
-    /// Writes `view_proj` and the light into slot `slot`'s camera buffer.
+    /// Writes `view_proj`, the light and the eye into view `view` of slot `slot`
+    /// (`MAIN_VIEW`, or a probe face 1..=6, § 25).
     ///
     /// # Safety
     /// The caller must have waited on that slot's fence: the GPU may still be
     /// reading the buffer otherwise (Q-10.2).
     pub(crate) unsafe fn write_camera(
         &self,
-        slot: usize,
+        (slot, view): (usize, usize),
         view_proj: Mat4,
         light: [f32; 4],
         eye: [f32; 4],
     ) {
+        let mapped = self.cameras[slot * VIEWS + view].mapped;
         // SAFETY: `mapped` points at 96 writable bytes; the caller guarantees the GPU isn't reading them.
-        unsafe { write_camera_bytes(self.cameras[slot].mapped, view_proj, light, eye) };
+        unsafe { write_camera_bytes(mapped, view_proj, light, eye) };
+    }
+
+    /// § 25: points binding 2 of one view's set at `view_image` (the probe's cube for
+    /// the main view, or back to the fixed environment).
+    ///
+    /// # Safety
+    /// As `write_camera`: the caller must have waited on that slot's fence.
+    pub(crate) unsafe fn set_view_environment(
+        &self,
+        device: &Device,
+        (slot, view): (usize, usize),
+        view_image: vk::ImageView,
+        sampler: vk::Sampler,
+    ) {
+        let image_info = [vk::DescriptorImageInfo::default()
+            .sampler(sampler)
+            .image_view(view_image)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let write = vk::WriteDescriptorSet::default()
+            .dst_set(self.cameras[slot * VIEWS + view].set)
+            .dst_binding(2)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .image_info(&image_info);
+        // SAFETY: guaranteed by the caller.
+        unsafe { device.update_descriptor_sets(&[write], &[]) };
     }
 
     /// § 23: points binding 2 of every slot's set at the cube `view` (the environment).
@@ -371,7 +430,7 @@ impl ShaderInputs {
     /// As `write_camera`: the caller must have waited on that slot's fence.
     pub(crate) unsafe fn write_instances(&self, slot: usize, matrices: &[Mat4]) {
         let count = matrices.len().min(INSTANCE_CAPACITY - 1);
-        let base = self.cameras[slot].instances_mapped;
+        let base = self.cameras[slot * VIEWS + MAIN_VIEW].instances_mapped; // shared by all views
         for (i, m) in matrices[..count].iter().enumerate() {
             let bytes = mat4_bytes(*m);
             // SAFETY: (1 + i) < INSTANCE_CAPACITY, so the 64 bytes are inside the mapped
@@ -382,9 +441,9 @@ impl ShaderInputs {
         }
     }
 
-    /// The descriptor set pointing at slot `slot`'s camera buffer.
-    pub(crate) fn camera_set(&self, slot: usize) -> vk::DescriptorSet {
-        self.cameras[slot].set
+    /// The descriptor set (set 0) of view `view` in slot `slot`.
+    pub(crate) fn camera_set(&self, slot: usize, view: usize) -> vk::DescriptorSet {
+        self.cameras[slot * VIEWS + view].set
     }
 
     /// Destroys the buffers, then the pool (which frees its sets), then the layouts.
@@ -396,7 +455,9 @@ impl ShaderInputs {
         unsafe {
             for camera in &self.cameras {
                 camera.buffer.destroy(device); // freeing the memory also unmaps it
-                camera.instances.destroy(device);
+                if let Some(own) = &camera.instances {
+                    own.destroy(device); // only the owner (the main view) frees it
+                }
             }
             device.destroy_descriptor_pool(self.pool, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);

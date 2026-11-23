@@ -143,6 +143,11 @@ impl Textures {
 
     /// § 23: what the environment binding needs — the cube's view and the sampler.
     /// `None` if `index` isn't a cube map.
+    /// The sampler every texture shares (§ 25: the probe's cube reads with it too).
+    pub(crate) fn sampler(&self) -> vk::Sampler {
+        self.sampler
+    }
+
     pub(crate) fn cube(&self, index: usize) -> Option<(vk::ImageView, vk::Sampler)> {
         self.textures
             .get(index)

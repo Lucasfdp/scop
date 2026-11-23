@@ -7,6 +7,7 @@ use crate::gpu::GpuContext;
 use crate::input::Input;
 use crate::maths::{Mat4, Vec3};
 use crate::mesh::MeshData;
+use crate::overlay;
 use crate::pipeline::{DrawStyle, Shaders};
 use crate::platform::RunError;
 use crate::shader_inputs::INSTANCE_CAPACITY;
@@ -190,6 +191,8 @@ pub(crate) struct DrawCall {
     /// § 22: (first instance, how many). Ordinary draws: (0, 1) — position 0, the
     /// identity. Instanced draws: their place in the frame's instance list.
     pub(crate) instances: (u32, u32),
+    /// § 25: drawn into the reflection probe's views too (false = reflective / text).
+    pub(crate) in_reflections: bool,
 }
 
 /// Where one `draw_instances` put its copies in this frame's instance list (§ 22):
@@ -217,6 +220,22 @@ pub struct Frame {
     pub(crate) instances: Vec<Mat4>,
     /// Some copies didn't fit in the list and weren't drawn.
     pub(crate) instances_dropped: bool,
+    /// § 25: capture a reflection probe this frame: (position, near, far).
+    pub(crate) probe: Option<(Vec3, f32, f32)>,
+    /// § 25: draws added while this is on are left out of the probe's views.
+    pub(crate) reflective: bool,
+    /// The image's size in pixels (for text, § 25 extra).
+    pub(crate) size: (f32, f32),
+    /// The engine's text pipeline, quad and font (`None` in tests: text is skipped).
+    pub(crate) overlay: Option<Overlay>,
+}
+
+/// The engine's own resources for text on screen (§ 25 extra).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Overlay {
+    pub(crate) pipeline: PipelineId,
+    pub(crate) quad: MeshId,
+    pub(crate) font: TextureId,
 }
 
 impl Frame {
@@ -232,7 +251,70 @@ impl Frame {
             eye: [0.0, 0.0, 0.0, 1.0],
             instances: Vec::new(),
             instances_dropped: false,
+            probe: None,
+            reflective: false,
+            size: (1.0, 1.0),
+            overlay: None,
         }
+    }
+
+    /// The image's size in pixels this frame (physical pixels: twice the window's
+    /// points on a Retina screen). For placing text.
+    pub fn size(&self) -> (f32, f32) {
+        self.size
+    }
+
+    /// § 25: capture the scene into a reflection probe at `position` this frame —
+    /// six extra views (costly: only ask when reflections are on screen). While a
+    /// probe is captured, the environment every shader reads (chrome) is the probe's
+    /// cube instead of the fixed one. `near` / `far`: the views' depth range.
+    pub fn set_reflection_probe(&mut self, position: Vec3, near: f32, far: f32) {
+        self.probe = Some((position, near, far));
+    }
+
+    /// § 25: draws added while `on` are left out of the probe's views — use it for the
+    /// reflective model itself (the probe sits inside it, Q-25.1).
+    pub fn set_reflective(&mut self, on: bool) {
+        self.reflective = on;
+    }
+
+    /// § 25 extra: `text` on screen from (x, y) — pixels from the top-left — at
+    /// `scale` pixels per font texel (1 = 8 × 13 per character). Drawn on top of
+    /// everything that came before; never in reflections. `\n` starts a new line.
+    pub fn draw_text(&mut self, text: &str, position: (f32, f32), scale: f32, colour: [f32; 3]) {
+        let glyphs = overlay::layout_text(text, position, scale);
+        self.draw_glyphs(&glyphs, colour);
+    }
+
+    /// § 25 extra: a solid rectangle on screen (pixels), e.g. behind text.
+    pub fn draw_panel(
+        &mut self,
+        (x, y): (f32, f32),
+        (width, height): (f32, f32),
+        colour: [f32; 3],
+    ) {
+        self.draw_glyphs(&[overlay::panel(x, y, width, height)], colour);
+    }
+
+    fn draw_glyphs(&mut self, glyphs: &[overlay::Glyph], colour: [f32; 3]) {
+        let Some(kit) = self.overlay else {
+            return;
+        };
+        let copies: Vec<Mat4> = glyphs
+            .iter()
+            .map(|g| overlay::glyph_instance(g, colour))
+            .collect();
+        let params = [self.size.0, self.size.1, 0.0, 0.0]; // the text shader needs the size
+        let was = std::mem::replace(&mut self.reflective, true); // never in reflections
+        self.draw_instances(
+            kit.pipeline,
+            kit.quad,
+            kit.font,
+            Mat4::IDENTITY,
+            params,
+            &copies,
+        );
+        self.reflective = was;
     }
 
     /// Width ÷ height of this frame's image, for `Mat4::perspective`. Read it
@@ -311,6 +393,7 @@ impl Frame {
             model,
             params,
             instances: (0, 1),
+            in_reflections: !self.reflective,
         });
     }
 
@@ -376,6 +459,7 @@ impl Frame {
             model,
             params,
             instances: (range.first, range.count),
+            in_reflections: !self.reflective,
         });
     }
 }
@@ -383,6 +467,38 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reflective_draws_stay_out_of_the_probe() {
+        let mut frame = Frame::new(1.0);
+        assert_eq!(frame.probe, None); // no probe → the fixed environment
+        frame.set_reflection_probe(Vec3::new(1.0, 2.0, 3.0), 0.1, 50.0);
+        frame.draw(PipelineId(0), MeshId(0), Mat4::IDENTITY);
+        frame.set_reflective(true);
+        frame.draw(PipelineId(0), MeshId(1), Mat4::IDENTITY);
+        frame.set_reflective(false);
+        frame.draw(PipelineId(0), MeshId(2), Mat4::IDENTITY);
+        let kept: Vec<_> = frame.draws.iter().map(|d| d.in_reflections).collect();
+        assert_eq!(kept, vec![true, false, true]);
+        assert_eq!(frame.probe, Some((Vec3::new(1.0, 2.0, 3.0), 0.1, 50.0)));
+    }
+
+    #[test]
+    fn text_is_never_reflected_and_leaves_the_flag_alone() {
+        let mut frame = Frame::new(1.0);
+        frame.draw_text("hi", (0.0, 0.0), 1.0, [1.0; 3]); // no kit (tests): skipped
+        assert!(frame.draws.is_empty());
+        frame.overlay = Some(Overlay {
+            pipeline: PipelineId(7),
+            quad: MeshId(8),
+            font: TextureId(9),
+        });
+        frame.draw_text("hi", (0.0, 0.0), 1.0, [1.0; 3]);
+        let text = &frame.draws[0];
+        assert_eq!((text.mesh, text.instances.1), (MeshId(8), 2)); // one copy per glyph
+        assert!(!text.in_reflections);
+        assert!(!frame.reflective);
+    }
 
     #[test]
     fn frame_keeps_camera_and_each_draws_model() {

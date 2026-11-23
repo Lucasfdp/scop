@@ -22,6 +22,12 @@ pub const SKY_SHADERS: Shaders<'static> = Shaders {
     fragment: include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv")),
 };
 
+/// § 25 extra: the text shaders (`shaders/text.*`) — glyphs from the built-in font.
+pub(crate) const TEXT_SHADERS: Shaders<'static> = Shaders {
+    vertex: include_bytes!(concat!(env!("OUT_DIR"), "/text.vert.spv")),
+    fragment: include_bytes!(concat!(env!("OUT_DIR"), "/text.frag.spv")),
+};
+
 /// The default shaders' sources, for hot reload: (vertex, fragment) of the model
 /// shaders, then of the sky. They exist on the machine that built the engine; on
 /// another one `ShaderWatch::start` says so and hot reload stays off (§ 21).

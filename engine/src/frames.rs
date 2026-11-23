@@ -131,6 +131,7 @@ pub(crate) struct FrameTarget<'a> {
 
 /// One draw, resolved from the app's tickets: real objects plus the model matrix
 /// and params as the 80 bytes the push constant carries.
+#[derive(Clone, Copy)]
 pub(crate) struct Draw<'a> {
     pub(crate) pipeline: vk::Pipeline,
     pub(crate) mesh: &'a Mesh,
@@ -152,14 +153,39 @@ pub(crate) struct DrawList<'a> {
     pub(crate) draws: Vec<Draw<'a>>,
 }
 
-/// Records one frame: make the image drawable, clear it, bind the camera, draw each
-/// mesh with its own model matrix (dynamic rendering), then make it presentable.
+/// § 25: the reflection probe's six views, drawn before the main pass.
+pub(crate) struct ProbePass<'a> {
+    pub(crate) image: vk::Image,
+    /// One view per face, to draw into (+x, −x, +y, −y, +z, −z).
+    pub(crate) face_views: [vk::ImageView; 6],
+    pub(crate) extent: vk::Extent2D,
+    pub(crate) depth: &'a DepthImage,
+    /// Set 0 of each face: that face's camera, and the *fixed* environment (the probe
+    /// can't read the cube it's drawing into).
+    pub(crate) sets: [vk::DescriptorSet; 6],
+    /// The draws that appear in reflections (not the reflective model, not text).
+    pub(crate) draws: Vec<Draw<'a>>,
+}
+
+/// The probe image's six layers.
+const PROBE_LAYERS: vk::ImageSubresourceRange = vk::ImageSubresourceRange {
+    aspect_mask: vk::ImageAspectFlags::COLOR,
+    base_mip_level: 0,
+    level_count: 1,
+    base_array_layer: 0,
+    layer_count: 6,
+};
+
+/// Records one frame: (§ 25: the probe's six views first, if any), then make the
+/// image drawable, clear it, bind the camera, draw each mesh with its own model matrix
+/// (dynamic rendering), then make it presentable.
 pub(crate) fn record_frame(
     device: &Device,
     rendering: &khr::dynamic_rendering::Device,
     command_buffer: vk::CommandBuffer,
     target: &FrameTarget,
     list: &DrawList,
+    probe: Option<&ProbePass>,
 ) -> Result<(), GpuError> {
     let to_drawable = vk::ImageMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::empty())
@@ -244,6 +270,10 @@ pub(crate) fn record_frame(
     unsafe {
         device.reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
         device.begin_command_buffer(command_buffer, &begin_info)?;
+        // § 25: the probe first, so its cube is finished before the main pass reads it.
+        if let Some(probe) = probe {
+            record_probe(device, rendering, command_buffer, list, probe);
+        }
         // Source stage matches the stage the submit waits on `image_free` at.
         device.cmd_pipeline_barrier(
             command_buffer,
@@ -278,39 +308,7 @@ pub(crate) fn record_frame(
             &[list.camera_set], // the sets, from slot 0 on
             &[],                // no dynamic offsets
         );
-        for draw in &list.draws {
-            let mesh = draw.mesh;
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                draw.pipeline,
-            );
-            // Set slot 1 = this draw's texture (the camera in slot 0 stays bound).
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                list.layout,
-                1,
-                &[draw.texture_set],
-                &[],
-            );
-            // The sticky note: model (bytes 0..64) + params (64..80), both stages —
-            // the same stages and size as the layout's range, or validation complains.
-            device.cmd_push_constants(command_buffer, list.layout, PUSH_STAGES, 0, &draw.push);
-            // Corners from binding 0, triangles from the index buffer (32-bit indices).
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices.handle], &[0]);
-            device.cmd_bind_index_buffer(
-                command_buffer,
-                mesh.indices.handle,
-                0,
-                vk::IndexType::UINT32,
-            );
-            // All indices, from index 0, no vertex offset; § 22: `count` copies whose
-            // matrices start at `first` in the instance list (gl_InstanceIndex counts
-            // from there). Ordinary draws: 1 copy at position 0, the identity.
-            let (first, count) = draw.instances;
-            device.cmd_draw_indexed(command_buffer, mesh.index_count, count, 0, 0, first);
-        }
+        record_draws(device, command_buffer, list.layout, &list.draws);
         rendering.cmd_end_rendering(command_buffer);
         // The drawing must finish before the frame counts as done.
         device.cmd_pipeline_barrier(
@@ -325,4 +323,192 @@ pub(crate) fn record_frame(
         device.end_command_buffer(command_buffer)?;
     }
     Ok(())
+}
+
+/// Every draw of a list, in order: pipeline, picture, sticky note, mesh, draw. Set 0
+/// (the camera) must already be bound.
+///
+/// # Safety
+/// Inside a rendering pass on `command_buffer`, with everything in `draws` alive.
+unsafe fn record_draws(
+    device: &Device,
+    command_buffer: vk::CommandBuffer,
+    layout: vk::PipelineLayout,
+    draws: &[Draw],
+) {
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        for draw in draws {
+            let mesh = draw.mesh;
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                draw.pipeline,
+            );
+            // Set slot 1 = this draw's texture (the camera in slot 0 stays bound).
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                layout,
+                1,
+                &[draw.texture_set],
+                &[],
+            );
+            // The sticky note: model (bytes 0..64) + params (64..80), both stages —
+            // the same stages and size as the layout's range, or validation complains.
+            device.cmd_push_constants(command_buffer, layout, PUSH_STAGES, 0, &draw.push);
+            // Corners from binding 0, triangles from the index buffer (32-bit indices).
+            device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices.handle], &[0]);
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                mesh.indices.handle,
+                0,
+                vk::IndexType::UINT32,
+            );
+            // All indices, from index 0, no vertex offset; § 22: `count` copies whose
+            // matrices start at `first` in the instance list (gl_InstanceIndex counts
+            // from there). Ordinary draws: 1 copy at position 0, the identity.
+            let (first, count) = draw.instances;
+            device.cmd_draw_indexed(command_buffer, mesh.index_count, count, 0, 0, first);
+        }
+    }
+}
+
+/// § 25: the probe's six views. Hand-over in (any → "drawn into"), one pass per face
+/// with that face's camera, hand-over out ("drawn into" → "read by shaders", Q-25.4).
+///
+/// # Safety
+/// Recording on `command_buffer`, outside any rendering pass, everything alive.
+unsafe fn record_probe(
+    device: &Device,
+    rendering: &khr::dynamic_rendering::Device,
+    command_buffer: vk::CommandBuffer,
+    list: &DrawList,
+    probe: &ProbePass,
+) {
+    let layout_change = |old, new, src_access, dst_access| {
+        vk::ImageMemoryBarrier::default()
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .old_layout(old)
+            .new_layout(new)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(probe.image)
+            .subresource_range(PROBE_LAYERS)
+    };
+    // Old layout UNDEFINED: every face is cleared anyway. Waits for last frame's
+    // chrome to finish reading the cube before drawing into it again.
+    let to_drawable = layout_change(
+        vk::ImageLayout::UNDEFINED,
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        vk::AccessFlags::SHADER_READ,
+        vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+    );
+    let to_readable = layout_change(
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        vk::AccessFlags::SHADER_READ,
+    );
+    // The probe's depth image is reused by every face: each face waits for the last
+    // one's depth writes (the same rule as § 11's frames in flight).
+    let depth_ready = vk::ImageMemoryBarrier::default()
+        .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+        .dst_access_mask(
+            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+        )
+        .old_layout(vk::ImageLayout::UNDEFINED)
+        .new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(probe.depth.image)
+        .subresource_range(probe.depth.range());
+    let area = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: probe.extent,
+    };
+    let viewport = vk::Viewport {
+        x: 0.0,
+        y: 0.0,
+        width: probe.extent.width as f32,
+        height: probe.extent.height as f32,
+        min_depth: 0.0,
+        max_depth: 1.0,
+    };
+
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[to_drawable],
+        );
+        for (face, &view) in probe.face_views.iter().enumerate() {
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                    | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[depth_ready],
+            );
+            let colour = [vk::RenderingAttachmentInfo::default()
+                .image_view(view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE) // kept: chrome reads it next
+                .clear_value(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: list.clear_colour,
+                    },
+                })];
+            let depth = vk::RenderingAttachmentInfo::default()
+                .image_view(probe.depth.view)
+                .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .clear_value(vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                });
+            let info = vk::RenderingInfo::default()
+                .render_area(area)
+                .layer_count(1)
+                .color_attachments(&colour)
+                .depth_attachment(&depth);
+            rendering.cmd_begin_rendering(command_buffer, &info);
+            device.cmd_set_viewport(command_buffer, 0, &[viewport]);
+            device.cmd_set_scissor(command_buffer, 0, &[area]);
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                list.layout,
+                0,
+                &[probe.sets[face]], // this face's camera
+                &[],
+            );
+            record_draws(device, command_buffer, list.layout, &probe.draws);
+            rendering.cmd_end_rendering(command_buffer);
+        }
+        // Hand-over: finished drawing → shaders may read it (Q-25.4).
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[to_readable],
+        );
+    }
 }

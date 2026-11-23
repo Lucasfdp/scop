@@ -9,9 +9,9 @@ use std::process::ExitCode;
 
 use engine::{
     App, CameraSettings, ColourMode, DefaultParams, DrawStyle, Easing, Flow, FpsCounter,
-    FpsReading, Frame, Gfx, GpuInfo, Image, Input, InstanceRange, Key, LoadedObj, Mat4, MeshId,
-    MouseButton, OrbitCamera, PipelineId, RunError, ShaderWatch, Shaders, Sky, TextureId,
-    Transform, Tween, UvMapping, Vec3, WindowConfig,
+    FpsReading, Frame, Gfx, GpuInfo, Image, Input, InstanceRange, Key, LoadedObj, Mat4, MeshData,
+    MeshId, MouseButton, OrbitCamera, PipelineId, RunError, ShaderWatch, Shaders, Sky, TextureId,
+    Transform, Tween, UvMapping, Vec3, Vertex, WindowConfig,
 };
 
 /// The cheerful picture (§ 14), embedded in the binary so scop works from any
@@ -44,27 +44,50 @@ const STYLES: [DrawStyle; 3] = [DrawStyle::Fill, DrawStyle::Wireframe, DrawStyle
 /// Background colour (linear RGBA).
 const BACKGROUND: [f32; 4] = [0.02, 0.02, 0.03, 1.0];
 
+// ASCII only: the built-in font has no arrows (anything else is drawn as `?`).
 const CONTROLS: &str = "\
 controls:
-  arrows      move left / right / up / down
+  arrow keys  move left / right / up / down
   W / S       move closer / further
   I / K       turn around x (tilt)
   J / L       turn around y (spin)
   U / O       turn around z (roll)
   T           fade between grey faces and the picture
   N           rotate which object gets which picture
-  V           solid → wireframe → points
-  C           colours: normal → facing → depth → chrome
+  V           solid -> wireframe -> points
+  C           colours: normal -> facing -> depth -> chrome
+  M           chrome: live reflections <-> fixed sky
   E           sky on / off
   wheel, Z/X  zoom in / out (field of view)
   mouse drag  orbit the camera round the model
   B           light on / off
-  G           one model ↔ a crowd of 512 (instancing)
+  G           one model <-> a crowd of 512 (instancing)
   Space       pause / resume the automatic spin
   R           reset (placement, zoom and camera)
+  P           props: coloured cubes orbiting the model (see them in live chrome)
+  H           hide / show these controls
   Esc         quit
   drop a .obj on the window to open it
   save the engine's shaders while scop runs: they reload (hot reload)";
+
+/// P: the props' colours (linear RGB), one cube each — bright, so they stand out in
+/// chrome. How far out they orbit and how big they are, × the model's radius.
+const PROP_COLOURS: [[f32; 3]; 6] = [
+    [0.9, 0.1, 0.1],
+    [0.95, 0.6, 0.05],
+    [0.9, 0.9, 0.1],
+    [0.1, 0.8, 0.2],
+    [0.1, 0.4, 0.95],
+    [0.6, 0.15, 0.9],
+];
+const PROP_ORBIT: f32 = 1.6;
+const PROP_SIZE: f32 = 0.18;
+/// Orbit speed, radians per second.
+const PROP_SPEED: f32 = 0.5;
+
+/// The on-screen controls' text colour and panel colour (linear RGB).
+const TEXT_COLOUR: [f32; 3] = [0.9, 0.9, 0.9];
+const PANEL_COLOUR: [f32; 3] = [0.01, 0.01, 0.015];
 
 /// What scop prints for each colour mode (C).
 fn describe(mode: ColourMode) -> &'static str {
@@ -72,7 +95,7 @@ fn describe(mode: ColourMode) -> &'static str {
         ColourMode::Normal => "normal",
         ColourMode::Facing => "facing (blue front, red back)",
         ColourMode::Depth => "depth (near white, far dark)",
-        ColourMode::Chrome => "chrome (reflects the sky)",
+        ColourMode::Chrome => "chrome (reflects what's around it; M: live / fixed)",
     }
 }
 
@@ -119,6 +142,16 @@ struct Scop {
     sky: Option<Sky>,
     /// E. Off at the start, so the mandatory part looks exactly as before.
     sky_on: bool,
+    /// § 25, M: chrome reflects a live probe (true) or the fixed sky (false).
+    live_reflections: bool,
+    /// § 25 extra, H: the controls on screen. On at the start.
+    show_controls: bool,
+    /// § 25 extra, P: coloured cubes orbiting the model, so live chrome has something
+    /// to reflect besides the sky. Off at the start. One mesh per colour.
+    props_on: bool,
+    prop_meshes: Vec<MeshId>,
+    /// Seconds the props have been orbiting.
+    props_time: f32,
 }
 
 /// A subtle grey for face `index` (§ 13, the subject's distinguishable faces): always
@@ -151,6 +184,53 @@ fn load_model(path: &Path) -> Result<LoadedObj, String> {
 /// turning its own way, all fitting inside the model's sphere (`centre`, `radius`) — so
 /// the camera, zoom and depth range need no change. Right to left: move the model's
 /// centre to the origin, shrink, tilt, spin, move to its cell.
+/// A cube of side 2 centred on the origin, one `colour`: 4 corners per face so each
+/// face has its own normal (flat, like the models, § 20).
+fn prop_cube(colour: [f32; 3]) -> MeshData {
+    let mut vertices = Vec::with_capacity(24);
+    let mut indices = Vec::with_capacity(36);
+    for axis in 0..3 {
+        for sign in [-1.0, 1.0] {
+            let mut normal = [0.0; 3];
+            normal[axis] = sign;
+            let first = vertices.len() as u32;
+            for (a, b) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let mut position = [0.0; 3];
+                position[axis] = sign;
+                position[(axis + 1) % 3] = a;
+                position[(axis + 2) % 3] = b;
+                vertices.push(Vertex {
+                    position,
+                    colour,
+                    uv: [(a + 1.0) / 2.0, (b + 1.0) / 2.0],
+                    normal,
+                });
+            }
+            indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+        }
+    }
+    MeshData { vertices, indices }
+}
+
+/// Where each prop is at `time`, in the world: evenly spaced on a ring round the
+/// model's centre (`middle`), alternately above and below, each tumbling.
+fn prop_places(middle: Vec3, radius: f32, time: f32) -> Vec<Mat4> {
+    let count = PROP_COLOURS.len();
+    let size = PROP_SIZE * radius;
+    (0..count)
+        .map(|i| {
+            let angle = time * PROP_SPEED + i as f32 * std::f32::consts::TAU / count as f32;
+            let height = if i % 2 == 0 { 0.35 } else { -0.35 } * radius;
+            let offset = Vec3::new(angle.cos(), 0.0, angle.sin()) * (PROP_ORBIT * radius)
+                + Vec3::new(0.0, height, 0.0);
+            Mat4::translation(middle + offset)
+                * Mat4::rotation_y(time + i as f32)
+                * Mat4::rotation_x(time * 0.7)
+                * Mat4::scale(Vec3::new(size, size, size))
+        })
+        .collect()
+}
+
 fn crowd_copies(centre: Vec3, radius: f32, time: f32) -> Vec<Mat4> {
     let side = CROWD_SIDE as f32;
     // Cell size: chosen so the whole grid, corners included, fits in the sphere.
@@ -181,6 +261,24 @@ fn crowd_copies(centre: Vec3, radius: f32, time: f32) -> Vec<Mat4> {
 }
 
 impl Scop {
+    /// § 25 extra: the controls in the top-left corner on a dark panel (H hides
+    /// them). Scale: one font texel per pixel up to 720 pixels tall, then bigger, so
+    /// the text stays readable on a Retina screen.
+    fn draw_controls(&self, frame: &mut Frame) {
+        if !self.show_controls {
+            return;
+        }
+        let scale = (frame.size().1 / 720.0).floor().max(1.0);
+        let margin = 8.0 * scale;
+        let (width, height) = engine::text_size(CONTROLS, scale);
+        frame.draw_panel(
+            (0.0, 0.0),
+            (width + 2.0 * margin, height + 2.0 * margin),
+            PANEL_COLOUR,
+        );
+        frame.draw_text(CONTROLS, (margin, margin), scale, TEXT_COLOUR);
+    }
+
     /// § 21: a shader was saved. `compiled` = the four files in `default_shader_files`
     /// order. Swap every model pipeline, then the sky's; any error is printed and the
     /// old shaders keep drawing.
@@ -290,6 +388,9 @@ impl App for Scop {
         for picture in &self.pictures {
             self.textures.push(gfx.create_texture(picture)?);
         }
+        for colour in PROP_COLOURS {
+            self.prop_meshes.push(gfx.create_mesh(&prop_cube(colour))?);
+        }
         // § 23: the sky — also the environment chrome reflects.
         if let Some(faces) = self.sky_faces.take() {
             let [a, b, c, d, e, f] = &faces;
@@ -326,6 +427,22 @@ impl App for Scop {
             self.colour_mode = self.colour_mode.next();
             println!("colours: {}", describe(self.colour_mode));
         }
+        if input.pressed(Key::M) {
+            self.live_reflections = !self.live_reflections; // § 25
+            let kind = if self.live_reflections {
+                "live"
+            } else {
+                "fixed sky"
+            };
+            println!("reflections: {kind}");
+        }
+        if input.pressed(Key::H) {
+            self.show_controls = !self.show_controls; // § 25 extra
+        }
+        if input.pressed(Key::P) {
+            self.props_on = !self.props_on; // § 25 extra
+        }
+        self.props_time += dt;
         // § 20: drag with the left button to orbit; B switches the light.
         if input.mouse_held(MouseButton::Left) {
             let (dx, dy) = input.mouse_delta();
@@ -403,6 +520,12 @@ impl App for Scop {
         frame.set_camera(self.camera.projection(frame.aspect(), framing) * view);
         frame.set_camera_position(eye); // § 23: chrome's reflections start from here
         frame.set_light(LIGHT_DIRECTION, if self.light_on { 1.0 } else { 0.0 });
+        // § 25: live chrome — capture what's around the model, from its centre. The
+        // model itself is left out of the probe (below), or it would fill its own cube.
+        let live = self.live_reflections && self.colour_mode == ColourMode::Chrome;
+        if live {
+            frame.set_reflection_probe(self.placement.position, framing.near, framing.far);
+        }
 
         // § 23: the sky first; depth writing off, so the model always goes on top.
         if let (true, Some(sky)) = (self.sky_on, self.sky) {
@@ -415,6 +538,7 @@ impl App for Scop {
         placed.angles.y += self.spin;
         let model = placed.matrix(self.model.centre);
         let Some(&(_, pipeline)) = self.pipelines.get(self.style) else {
+            self.draw_controls(frame);
             return;
         };
         let params = DefaultParams {
@@ -432,7 +556,15 @@ impl App for Scop {
         // One draw per object, each with its own picture (§ 18, Q-18.3) — with the
         // crowd on, one instanced draw per object; the first object stores the copies,
         // the others reuse its seats (shared range).
+        // § 25 extra: the props — ordinary draws, so they appear in the probe's views.
+        if self.props_on {
+            let places = prop_places(self.placement.position, radius, self.props_time);
+            for (&mesh, place) in self.prop_meshes.iter().zip(places) {
+                frame.draw(pipeline, mesh, place);
+            }
+        }
         let mut shared: Option<InstanceRange> = None;
+        frame.set_reflective(live); // the model: never in its own reflection
         for (i, &mesh) in self.meshes.iter().enumerate() {
             let Some(texture) = picture_for(i, self.picture_shift, &self.textures) else {
                 continue;
@@ -447,6 +579,9 @@ impl App for Scop {
                 }
             }
         }
+        frame.set_reflective(false);
+        // § 25 extra: last, so nothing drawn after can paint over it.
+        self.draw_controls(frame);
     }
 }
 
@@ -568,6 +703,11 @@ fn main() -> ExitCode {
         sky_faces: Some(sky_faces),
         sky: None,
         sky_on: false,
+        live_reflections: true,
+        show_controls: true,
+        props_on: false,
+        prop_meshes: Vec::new(),
+        props_time: 0.0,
     };
     match engine::run(config, scop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -610,6 +750,30 @@ fn print_gpu_info(info: &GpuInfo) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn props_ring_the_model_without_touching_it() {
+        let middle = Vec3::new(1.0, 2.0, 3.0);
+        let places = prop_places(middle, 2.0, 0.7);
+        assert_eq!(places.len(), PROP_COLOURS.len());
+        for place in places {
+            let centre = place.to_cols_array()[3];
+            let gap = (Vec3::new(centre[0], centre[1], centre[2]) - middle).length();
+            // Outside the model's sphere (+ the cube's own corner), inside the framing.
+            assert!(gap - PROP_SIZE * 2.0 * 3f32.sqrt() > 2.0, "{gap}");
+            assert!(gap < 2.0 * 2.0, "{gap}");
+        }
+        let cube = prop_cube([1.0, 0.0, 0.0]);
+        assert_eq!((cube.vertices.len(), cube.indices.len()), (24, 36));
+    }
+
+    #[test]
+    fn controls_are_plain_ascii_for_the_built_in_font() {
+        assert!(
+            CONTROLS.is_ascii(),
+            "the font has no glyph for non-ASCII: use ->, <->"
+        );
+    }
 
     #[test]
     fn greys_are_subtle_and_neighbours_differ() {

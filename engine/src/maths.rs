@@ -145,7 +145,7 @@ pub struct Mat4 {
 impl Mat4 {
     /// Write a matrix the way it looks on paper (rows), store it as columns.
     /// Every card below uses this, so the code matches the pictures in § 9.
-    const fn from_rows(r: [[f32; 4]; 4]) -> Self {
+    pub(crate) const fn from_rows(r: [[f32; 4]; 4]) -> Self {
         Mat4 {
             cols: [
                 [r[0][0], r[1][0], r[2][0], r[3][0]],

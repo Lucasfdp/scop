@@ -1624,3 +1624,31 @@ La misma idea ("espera a que eso termine"), distinto **quien espera**. Pregúnta
 ### tween
 **Llano:** un valor que se suaviza hacia un objetivo con el tiempo (el fundido de § 15, generalizado).
 **Introducido en:** § 24
+
+### render to texture
+**Llano:** dibujar en una imagen normal en vez de en la pantalla, y luego usarla como textura.
+**Introducido en:** § 25
+
+### render target
+**Llano:** la imagen en la que dibuja una pasada (color, más su propia imagen de profundidad).
+**Introducido en:** § 25
+
+### reflection probe
+**Llano:** un punto donde se captura la escena en un cube map cada fotograma, para los reflejos.
+**Introducido en:** § 25
+
+### cube face camera
+**Llano:** una de las seis cámaras de una sonda: cuadrada, 90° de ancho, mirando a una pared del cubo.
+**Introducido en:** § 25
+
+### probe exclusion
+**Llano:** draws que se dejan fuera de las vistas de la sonda (el propio modelo reflectante).
+**Introducido en:** § 25
+
+### offscreen pass
+**Llano:** dibujo que no se muestra (las seis vistas de la sonda), grabado antes de la pasada principal.
+**Introducido en:** § 25
+
+### layout hand-over
+**Llano:** la barrera que pasa la imagen de la sonda de 'se dibuja en ella' a 'la leen los shaders'.
+**Introducido en:** § 25

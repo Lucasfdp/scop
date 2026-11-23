@@ -136,34 +136,41 @@ takes the next picture in turn. Pictures must be 24- or 32-bit TGA
 - [GPU Gems 3, ch. 24 — The Importance of Being Linear](https://developer.nvidia.com/gpugems/gpugems3/part-iv-image-effects/chapter-24-importance-being-linear) — sRGB and gamma
 - [The Rust Programming Language](https://doc.rust-lang.org/book/)
 
-### AI usage
+### Font
 
-<!-- Lucas: this is a DRAFT. Edit until every sentence is true in your own words.
-     Fill in the two <…> markers. -->
+The on-screen controls use X11's **misc-fixed 8×13** bitmap font (font-misc-misc,
+"Public domain font. Share and enjoy."), converted once into
+`engine/assets/font_8x13.tga` and read with scop's own TGA loader — no font library.
+
+### AI usage
 
 I used **Claude** (Anthropic) throughout this project, in a way I chose deliberately and
 recorded in [`DECISIONS.md`](DECISIONS.md) (2026-11-03).
 
-- **Learning material.** Claude wrote the staged learning plan in `learn/`: 19 sections
+**How I worked.** scop was also an experiment in a way of working: the concepts were new
+to me (GPUs, Vulkan, 3D rendering), but I treated writing the code differently from
+learning them. Each module of a staged learning plan had concept questions I had to pass
+*before* any code was written; then Claude wrote that checkpoint's code, and I had to
+answer walkthrough questions on it before the module counted as done. The aim was to
+understand every part of the project without typing every line by hand — and I enjoyed
+building scop this way.
+
+- **Learning material.** Claude wrote the staged learning plan in `learn/`: 25 sections
   (Rust, how a GPU draws, Vulkan setup, synchronisation, shaders, buffers, 3D maths,
   descriptors, depth, `.obj`, textures, …), each with explanations, a glossary and
   questions.
 - **Code.** For each section I first read the material and answered its questions
   (a "gate", graded honestly — misses were re-explained and re-tested). Only then did
   Claude write that section's checkpoint code and walk me through it part by part; the
-  section only counted as done once I could explain the code back. Written this way:
-  almost all of `engine/` and `scop/` — Vulkan setup, swapchain, frame loop and
-  synchronisation, pipeline and shader loading, buffers, the maths library,
-  uniforms and descriptors, depth buffer, the `.obj` parser, greys and controls, the TGA
-  loader and textures, the fade, window resizing, the bonus (ear clipping, box mapping,
-  a picture per object, view modes, zoom, FPS, drag & drop, debug colours, orbit camera,
-  lighting, shader hot reload, instancing, skybox and chrome) — plus the unit tests, the `Makefile`
-  and `scripts/deps.sh`.
-- **Mine.** The choices (Rust + Vulkan, the engine/app split, and each decision in
-  `DECISIONS.md`, picked from the trade-offs Claude laid out), running and checking every
-  checkpoint on my machine and reporting what I saw, catching problems such as the
-  `+`/`−` keys not working on a Spanish keyboard, the texture picture <where it comes
-  from>, and <anything else you did>.
+  section only counted as done once I could explain the code back.
+- **Mine.** The direction of the project: what was included, why, and how I wanted it to
+  work. Claude laid out the options and their trade-offs; the decisions were mine (they
+  are recorded in `DECISIONS.md`). I also ran and checked every checkpoint on my machine
+  and reported what I saw, which caught problems such as the `+`/`−` keys not working on
+  a Spanish keyboard.
+- **Texture picture.** `resources/texture.tga` is reused from an earlier project of mine;
+  I generated it with an AI image tool (I tried several at the time and don't remember
+  which one made it).
 - **Learning record.** `learn/PROGRESS.md` logs every gate and explain-back, including what I
   got wrong first.
 

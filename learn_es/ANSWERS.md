@@ -745,3 +745,29 @@ app.
 **A-24.5** El "arriba" de la cámara está fijado como +y: en un mundo con +z arriba, orbitar sube por el
 lado equivocado, el horizonte se inclina, y el límite de pitch protege el eje equivocado. El **eje de
 arriba** (y el límite respecto a él) debería ser un ajuste, con +y por defecto para que scop no cambie.
+
+## Sección 25
+
+**A-25.1** La sonda está **dentro** del modelo. Dibujar el modelo en su propio cubo llenaría las seis
+vistas con las superficies interiores del modelo, así que el cromado reflejaría su propio interior
+(oscuro, del revés) en vez de lo que lo rodea. Excluirlo mantiene el reflejo sobre lo que hay
+*alrededor* — el mismo límite que en § 23: el modelo nunca se refleja a sí mismo.
+
+**A-25.2** Porque lo que rodea al modelo puede cambiar cada fotograma: el color de fondo, el cielo que se
+activa o desactiva, otros objetos que se mueven (en proyectos futuros: un mundo entero). Una captura
+hecha una sola vez volvería a ser la imagen fija de § 23. (La órbita por sí sola no lo cambia — la sonda
+está en el modelo, no en la cámara —, pero cualquier cosa de la escena sí.)
+
+**A-25.3** **Fijo:** el cielo (el cubo de § 23 siempre está enlazado, aunque el cielo no se dibuje). **En
+vivo:** verde — la sonda solo ve el fondo verde en todas las direcciones, así que todo el modelo refleja
+un verde plano (una silueta limpia, como aceptó el propietario).
+
+**A-25.4** Puede que el cromado lea el cubo **mientras aún se está dibujando**, o en el layout
+equivocado: el reflejo del fotograma anterior, caras a medio terminar, parpadeo — o basura en algunas
+GPUs. Sí: la validación informa de que la imagen se muestrea en el layout equivocado (todavía "se dibuja
+en ella" en vez de "la leen los shaders"). Sin validación es indefinido.
+
+**A-25.5** Es caro: seis vistas más de la escena cada fotograma, hasta siete veces el dibujo — así que
+solo cuando alguien puede verlo (modo cromado). Y un reflejo es una parte pequeña y curva de la pantalla
+donde el detalle se pierde de todos modos: 256² por cara sobra, y seis caras del tamaño de la ventana
+volverían a multiplicar el coste para nada visible.

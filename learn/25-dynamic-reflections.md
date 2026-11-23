@@ -2,7 +2,7 @@
 section: 25
 slug: dynamic-reflections
 tier: T1
-status: in-progress
+status: done
 prereqs: [5, 11, 23, 24]
 terms: [render to texture, render target, reflection probe, cube face camera, probe exclusion, offscreen pass, layout hand-over]
 ---

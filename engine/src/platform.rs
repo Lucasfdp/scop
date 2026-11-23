@@ -169,6 +169,8 @@ impl<A: App> Runner<A> {
 
         // The aspect of the image this frame will be drawn into, fresh every frame.
         let mut frame = Frame::new(graphics.gpu.aspect());
+        frame.size = graphics.gpu.size(); // § 25 extra: for text
+        frame.overlay = graphics.gpu.overlay();
         self.app.draw(&mut frame);
 
         // § 19: title throttling — only touch the window when the text changed.
