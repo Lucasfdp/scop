@@ -6,7 +6,7 @@
 # Compiled shaders (generated from GLSL by glslc)
 *.spv
 # ...except the committed fallback copies (§ 16, option C): refresh with `make spv`
-!scop/shaders/spv/*.spv
+!engine/shaders/spv/*.spv
 
 # AI-agent files (not part of the deliverable)
 CLAUDE.md
